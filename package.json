@@ -1,0 +1,34 @@
+{
+  "name": "the-quad",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The Quad - private alumni network for EDUK8U and ICQA graduates",
+  "scripts": {
+    "setup": "cd server && npm install && cd ../client && npm install",
+    "build": "cd client && npm run build",
+    "start": "node --env-file=.env server/index.js",
+    "dev:server": "node --env-file=.env server/index.js",
+    "dev:client": "cd client && npm run dev",
+    "reset-db": "cd server && npm run reset",
+    "test": "npx playwright test",
+    "test:api": "npx playwright test --grep-invert @ui",
+    "test:report": "npx playwright show-report tests/report"
+  },
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dev-eduk8u/the-quad.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/dev-eduk8u/the-quad/issues"
+  },
+  "homepage": "https://github.com/dev-eduk8u/the-quad#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "dotenv": "^17.4.2"
+  }
+}
