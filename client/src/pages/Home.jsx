@@ -4,6 +4,9 @@ import { api, timeAgo, eventDate } from "../api.js";
 import { useAuth } from "../App.jsx";
 import { Avatar, Badge, Icon, Spinner } from "../ui.jsx";
 
+const POST_MAX = 3000;
+const COMMENT_MAX = 1000;
+
 function greeting() {
   const h = new Date().getHours();
   return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
@@ -15,6 +18,7 @@ function Post({ p, me, onDelete }) {
   const [comments, setComments] = useState(null); // null = collapsed
   const [nComments, setNComments] = useState(p.comments);
   const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
 
   const toggleLike = async () => {
     const r = await api.post(`/posts/${p.id}/like`);
@@ -24,11 +28,16 @@ function Post({ p, me, onDelete }) {
     setComments(comments === null ? await api.get(`/posts/${p.id}/comments`) : null);
   const sendComment = async (e) => {
     e.preventDefault();
-    if (!draft.trim()) return;
-    await api.post(`/posts/${p.id}/comments`, { body: draft });
-    setDraft("");
-    setComments(await api.get(`/posts/${p.id}/comments`));
-    setNComments(nComments + 1);
+    if (!draft.trim() || sending) return;
+    setSending(true);
+    try {
+      await api.post(`/posts/${p.id}/comments`, { body: draft });
+      setDraft("");
+      setComments(await api.get(`/posts/${p.id}/comments`));
+      setNComments(nComments + 1);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -67,8 +76,10 @@ function Post({ p, me, onDelete }) {
             </div>
           ))}
           <form className="comment-box" onSubmit={sendComment}>
-            <input placeholder="Write a comment…" value={draft} onChange={(e) => setDraft(e.target.value)} />
-            <button className="btn sm">Send</button>
+            <input placeholder="Write a comment…" value={draft} maxLength={COMMENT_MAX}
+              onChange={(e) => setDraft(e.target.value)} />
+            <span className="counter">{draft.length}/{COMMENT_MAX}</span>
+            <button className="btn sm" disabled={!draft.trim() || sending}>{sending ? "Sending…" : "Send"}</button>
           </form>
         </div>
       )}
@@ -84,6 +95,7 @@ export default function Home() {
   const [draft, setDraft] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [showLink, setShowLink] = useState(false);
+  const [posting, setPosting] = useState(false);
 
   const load = () => {
     api.get("/feed").then(setPosts);
@@ -91,12 +103,19 @@ export default function Home() {
   };
   useEffect(load, []);
 
+  // Without an in-flight guard a second click (or a second Enter) fires a second POST
+  // before the first returns, which is how the same post ended up in the feed twice.
   const publish = async (e) => {
     e.preventDefault();
-    if (!draft.trim()) return;
-    await api.post("/posts", { body: draft, link_url: linkUrl });
-    setDraft(""); setLinkUrl(""); setShowLink(false);
-    api.get("/feed").then(setPosts);
+    if (!draft.trim() || posting) return;
+    setPosting(true);
+    try {
+      await api.post("/posts", { body: draft, link_url: linkUrl });
+      setDraft(""); setLinkUrl(""); setShowLink(false);
+      await api.get("/feed").then(setPosts);
+    } finally {
+      setPosting(false);
+    }
   };
   const deletePost = async (id) => {
     if (!confirm("Delete this post?")) return;
@@ -130,7 +149,7 @@ export default function Home() {
               <Avatar name={me.name} file={me.avatar_file} size={42} />
               <textarea
                 placeholder={`What's on your mind, ${firstName}? Share news, a job lead, or ask the marketplace…`}
-                value={draft} onChange={(e) => setDraft(e.target.value)}
+                value={draft} maxLength={POST_MAX} onChange={(e) => setDraft(e.target.value)}
               />
             </div>
             <div className="pub-actions">
@@ -142,7 +161,8 @@ export default function Home() {
                 </button>
               )}
               <span style={{ flex: 1 }} />
-              <button className="btn" disabled={!draft.trim()}>Post</button>
+              {draft.length > 0 && <span className="counter">{draft.length}/{POST_MAX}</span>}
+              <button className="btn" disabled={!draft.trim() || posting}>{posting ? "Posting…" : "Post"}</button>
             </div>
           </form>
         </section>

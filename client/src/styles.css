@@ -454,3 +454,13 @@ table.adm .mono { font-family: Consolas, monospace; font-size: 12px; color: var(
 .login-alt { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; margin-top: 14px; }
 .login-alt button { font-size: 12.5px; font-weight: 600; color: var(--teal); background: none; padding: 0; }
 .login-alt button:hover { text-decoration: underline; }
+
+/* character counter next to composers */
+.counter { font-size: 11px; color: var(--slate-lt); font-variant-numeric: tabular-nums;
+  flex: none; align-self: center; }
+
+/* search submit button in the top bar */
+.search-go { display: flex; align-items: center; padding: 0; background: none;
+  border: 0; color: inherit; flex: none; }
+.search-go:hover { color: #E6EDF5; }
+.search-go:focus-visible { outline: 2px solid #7DD3FC; outline-offset: 2px; border-radius: 4px; }

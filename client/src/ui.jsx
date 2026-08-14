@@ -212,9 +212,15 @@ export function Layout() {
           <span className="bt"><b>EDUK8U</b><small>Upskilling <i>|</i> Reskilling</small></span>
         </a>
         <Link to="/" className="wordmark">The Quad</Link>
-        <form className="searchbox" onSubmit={(e) => { e.preventDefault(); nav(`/directory?q=${encodeURIComponent(q)}`); }}>
-          <Icon name="search" size={13} stroke={2.4} />
-          <input placeholder="Search members, companies, roles…" value={q} onChange={(e) => setQ(e.target.value)} />
+        {/* The magnifier is a real submit button: with only an input and no button the form
+            relied on implicit submission, and pressing Enter did nothing at all. */}
+        <form className="searchbox" role="search"
+          onSubmit={(e) => { e.preventDefault(); nav(`/directory?q=${encodeURIComponent(q.trim())}`); }}>
+          <button type="submit" className="search-go" aria-label="Search">
+            <Icon name="search" size={13} stroke={2.4} />
+          </button>
+          <input placeholder="Search members, companies, roles…" value={q}
+            onChange={(e) => setQ(e.target.value)} />
         </form>
         <div className="top-right">
           <Bell />

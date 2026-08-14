@@ -4,6 +4,8 @@ import { api, timeAgo } from "../api.js";
 import { useAuth } from "../App.jsx";
 import { Avatar, Badge, Spinner } from "../ui.jsx";
 
+const MESSAGE_MAX = 2000; // matches the server, which truncates at 2000
+
 export default function Messages() {
   const { userId } = useParams();
   const { me } = useAuth();
@@ -11,6 +13,7 @@ export default function Messages() {
   const [convs, setConvs] = useState(null);
   const [thread, setThread] = useState(null);
   const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
   const bottomRef = useRef(null);
 
   const loadConvs = () => api.get("/messages").then(setConvs);
@@ -28,10 +31,15 @@ export default function Messages() {
 
   const send = async (e) => {
     e.preventDefault();
-    if (!draft.trim()) return;
-    await api.post(`/messages/${userId}`, { body: draft });
-    setDraft("");
-    loadThread(); loadConvs();
+    if (!draft.trim() || sending) return;
+    setSending(true);
+    try {
+      await api.post(`/messages/${userId}`, { body: draft });
+      setDraft("");
+      loadThread(); loadConvs();
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -83,8 +91,9 @@ export default function Messages() {
             </div>
             <form className="thread-compose" onSubmit={send}>
               <input placeholder={`Message ${thread.partner.name.split(" ")[0]}…`} value={draft}
-                onChange={(e) => setDraft(e.target.value)} />
-              <button className="btn" disabled={!draft.trim()}>Send</button>
+                maxLength={MESSAGE_MAX} onChange={(e) => setDraft(e.target.value)} />
+              {draft.length > 0 && <span className="counter">{draft.length}/{MESSAGE_MAX}</span>}
+              <button className="btn" disabled={!draft.trim() || sending}>{sending ? "Sending…" : "Send"}</button>
             </form>
           </>
         )}
