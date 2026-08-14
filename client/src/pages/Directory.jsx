@@ -1,12 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api } from "../api.js";
+import { api, isLinkedIn } from "../api.js";
 import { useAuth } from "../App.jsx";
 import { Avatar, Badge, Spinner, Toast } from "../ui.jsx";
-
-// Only show the "in" icon for links that actually point at a LinkedIn profile. Older
-// profiles hold handles and company pages that rendered a working icon leading to a 404.
-const isLinkedIn = (u) => /^https?:\/\/([a-z]{2,3}\.)?(www\.)?linkedin\.com\/in\/[^/?#]+/i.test(String(u || ""));
 
 export default function Directory() {
   const { me } = useAuth();

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api.js";
+import { api, dateTime, fullDate } from "../api.js";
 
 function StatusBadge({ status }) {
   const styles = {
@@ -13,7 +13,7 @@ function RunCard({ run }) {
   const [open, setOpen] = useState(false);
   const pct = run.total > 0 ? Math.round((run.passed / run.total) * 100) : 0;
   const allPassed = run.failed === 0;
-  const date = new Date(run.run_at).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" });
+  const date = dateTime(run.run_at);
 
   return (
     <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, marginBottom: 16, overflow: "hidden" }}>
@@ -137,7 +137,7 @@ export default function TestDashboard() {
       {latest && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 28 }}>
           {[
-            { label: "Last run", value: new Date(latest.run_at).toLocaleDateString("en-AU", { dateStyle: "medium" }) },
+            { label: "Last run", value: fullDate(latest.run_at) },
             { label: "Tests passing", value: `${latest.passed} / ${latest.total}`, ok: allPassed },
             { label: "Overall status", value: allPassed ? "All Good ✓" : `${latest.failed} issue${latest.failed > 1 ? "s" : ""}`, ok: allPassed },
           ].map((s) => (

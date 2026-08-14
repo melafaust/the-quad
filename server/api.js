@@ -125,7 +125,7 @@ router.delete("/me/cv", async (req, res) => {
 });
 
 router.get("/users/:id", async (req, res) => {
-  const u = await db.get(`SELECT ${PUBLIC_USER}, cv_file FROM users WHERE id=? AND active=TRUE`, req.params.id);
+  const u = await db.get(`SELECT ${PUBLIC_USER} FROM users WHERE id=? AND active=TRUE`, req.params.id);
   if (!u) return res.status(404).json({ error: "Member not found" });
   const me = req.user.id;
   const conn = await connectionBetween(me, Number(req.params.id));

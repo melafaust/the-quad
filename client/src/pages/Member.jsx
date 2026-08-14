@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { api, getToken } from "../api.js";
+import { api, getToken, parseDate, isLinkedIn } from "../api.js";
 import { useAuth } from "../App.jsx";
 import { Avatar, Badge, Spinner, ErrorNote } from "../ui.jsx";
 
@@ -71,7 +71,7 @@ export default function Member() {
                     </>
                   )}
                   {u.connection?.status === "accepted" && <span className="badge b-ok" style={{ alignSelf: "center" }}>Connected</span>}
-                  {u.linkedin_url && <a className="li-btn" style={{ width: 34, height: 34 }} href={u.linkedin_url} target="_blank" rel="noreferrer" title="LinkedIn">in</a>}
+                  {isLinkedIn(u.linkedin_url) && <a className="li-btn" style={{ width: 34, height: 34 }} href={u.linkedin_url} target="_blank" rel="noreferrer" title={`${u.name} on LinkedIn`}>in</a>}
                 </>
               )}
             </div>
@@ -114,7 +114,7 @@ export default function Member() {
                 <div className="kv"><span className="k">Institution</span><span className="v">{u.brand}</span></div>
                 {u.industry && <div className="kv"><span className="k">Industry</span><span className="v">{u.industry}</span></div>}
                 {u.country && <div className="kv"><span className="k">Location</span><span className="v">{[u.city, u.country].filter(Boolean).join(", ")}</span></div>}
-                <div className="kv"><span className="k">Member since</span><span className="v">{new Date(u.created_at.replace(" ", "T") + "Z").toLocaleDateString("en-GB", { month: "short", year: "numeric" })}</span></div>
+                <div className="kv"><span className="k">Member since</span><span className="v">{parseDate(u.created_at)?.toLocaleDateString("en-GB", { month: "short", year: "numeric" }) || "—"}</span></div>
               </div>
               <div className="card pbox">
                 <h4>CV</h4>

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, getToken, timeAgo } from "../api.js";
-import { Spinner, ErrorNote } from "../ui.jsx";
+import { api, getToken, timeAgo, dateTime } from "../api.js";
+import { Spinner, ErrorNote, Toast } from "../ui.jsx";
 
 const TABS = ["Overview", "Invites", "Members", "Content"];
 
@@ -59,6 +59,7 @@ function Invites() {
   const [form, setForm] = useState({ name: "", email: "", brand: "EDUK8U", programme: "", grad_year: "", country: "" });
   const [csvResult, setCsvResult] = useState(null);
   const [err, setErr] = useState("");
+  const [toast, setToast] = useState("");
   const fileRef = useRef(null);
 
   const load = () => api.get("/admin/invites").then(setInvites);
@@ -103,6 +104,30 @@ function Invites() {
   const revoke = async (id) => { await api.del(`/admin/invites/${id}`); load(); };
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
+  // The Quad has no mail provider, so creating an invite only mints the code — nothing is
+  // emailed. These two hand the code to the alumni office ready to send.
+  const inviteText = (i) =>
+    `Hi ${i.name},\n\n` +
+    `You're invited to The Quad, the private alumni network for EDUK8U and ICQA graduates.\n\n` +
+    `Go to ${window.location.origin}/login, choose "Redeem invite", and enter this code:\n\n` +
+    `    ${i.code}\n\n` +
+    `The code works once and is tied to your email (${i.email}).\n\n` +
+    `See you inside,\nThe Alumni Office`;
+
+  const sendInvite = (i) => {
+    const url = `mailto:${encodeURIComponent(i.email)}` +
+      `?subject=${encodeURIComponent("Your invite to The Quad")}` +
+      `&body=${encodeURIComponent(inviteText(i))}`;
+    window.open(url, "_blank", "noopener");
+    navigator.clipboard?.writeText(inviteText(i)).catch(() => {});
+    setToast(`Opening your email app for ${i.email}. The invite text is also copied to your clipboard.`);
+  };
+
+  const copyInvite = (i) => {
+    navigator.clipboard?.writeText(inviteText(i)).catch(() => {});
+    setToast(`Invite for ${i.name} copied — paste it into email or WhatsApp.`);
+  };
+
   return (
     <>
       <div className="card pbox" style={{ marginBottom: 16 }}>
@@ -137,6 +162,10 @@ function Invites() {
           <div className="field"><label>Country</label><input value={form.country} onChange={set("country")} /></div>
         </div>
         <button className="btn">Create invite code</button>
+        <p style={{ fontSize: 12.5, color: "var(--slate)", marginTop: 10 }}>
+          Creating an invite mints the code only — The Quad does not email it. Use <b>Email invite</b> in the
+          table below to open a pre-written message, or <b>Copy</b> to paste it into WhatsApp.
+        </p>
       </form>
 
       <div className="card" style={{ padding: "8px 6px" }}>
@@ -155,10 +184,20 @@ function Invites() {
                     <td className="mono">{i.code}</td>
                     <td>
                       {i.status === "redeemed" && <span className="pill ok">Redeemed{i.redeemed_name ? ` · ${i.redeemed_name}` : ""}</span>}
-                      {i.status === "sent" && <span className="pill sent">Sent</span>}
+                      {i.status === "sent" && <span className="pill sent">Awaiting send</span>}
                       {i.status === "revoked" && <span className="pill off">Revoked</span>}
                     </td>
-                    <td>{i.status === "sent" && <button className="link-btn red" onClick={() => revoke(i.id)}>Revoke</button>}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      {i.status === "sent" && (
+                        <>
+                          <button className="link-btn" onClick={() => sendInvite(i)}>Email invite</button>
+                          {" · "}
+                          <button className="link-btn" onClick={() => copyInvite(i)}>Copy</button>
+                          {" · "}
+                          <button className="link-btn red" onClick={() => revoke(i.id)}>Revoke</button>
+                        </>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -166,6 +205,8 @@ function Invites() {
           )}
         </div>
       </div>
+
+      <Toast msg={toast} onDone={() => setToast("")} />
     </>
   );
 }
@@ -192,7 +233,7 @@ function ResetRequests() {
                 <td><b>{r.name}</b></td>
                 <td>{r.email}</td>
                 <td><code>{r.token}</code></td>
-                <td>{new Date(r.created_at).toLocaleString()}</td>
+                <td>{dateTime(r.created_at)}</td>
               </tr>
             ))}
           </tbody>

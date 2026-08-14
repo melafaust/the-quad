@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, timeAgo } from "../api.js";
 import { useAuth } from "../App.jsx";
-import { Spinner, Icon } from "../ui.jsx";
+import { Spinner, Icon, Toast } from "../ui.jsx";
 
 const empty = { title: "", company: "", location: "", country: "", job_type: "Full-time", salary_range: "", job_function: "", description: "", apply_url: "", apply_email: "" };
 
@@ -13,6 +13,15 @@ export default function Jobs() {
   const [f, setF] = useState({ country: "", fn: "", q: "" });
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(empty);
+  const [toast, setToast] = useState("");
+
+  // The mailto: link does nothing on machines with no mail client configured, which is
+  // how testers hit a dead "Apply by email" button. Copy the address as well so there is
+  // always a way to reach the poster, and say which address it was.
+  const applyByEmail = (email) => {
+    navigator.clipboard?.writeText(email).catch(() => {});
+    setToast(`Opening your email app for ${email} — the address is also copied to your clipboard.`);
+  };
 
   const load = () => {
     const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v));
@@ -27,7 +36,7 @@ export default function Jobs() {
     setForm(empty); setShowForm(false); load();
   };
   const remove = async (id) => {
-    if (!confirm("Remove this job post?")) return;
+    if (!confirm("Remove this job post? This can't be undone.")) return;
     await api.del(`/jobs/${id}`); load();
   };
 
@@ -98,7 +107,10 @@ export default function Jobs() {
               </div>
               <div className="job-cta">
                 {j.apply_url && <a className="btn sm" href={j.apply_url} target="_blank" rel="noreferrer">Apply</a>}
-                {!j.apply_url && j.apply_email && <a className="btn sm" href={`mailto:${j.apply_email}?subject=${encodeURIComponent("Application: " + j.title)}`}>Apply by email</a>}
+                {!j.apply_url && j.apply_email && (
+                  <a className="btn sm" href={`mailto:${j.apply_email}?subject=${encodeURIComponent("Application: " + j.title)}`}
+                    target="_blank" rel="noreferrer" onClick={() => applyByEmail(j.apply_email)}>Apply by email</a>
+                )}
                 {!j.apply_url && !j.apply_email && <Link className="btn ghost sm" to={`/messages/${j.author_id}`}>Message poster</Link>}
                 {(j.poster_id === me.id || me.role === "admin") && (
                   <button className="link-btn red" onClick={() => remove(j.id)}>Remove</button>
@@ -109,6 +121,8 @@ export default function Jobs() {
           {jobs.length === 0 && <p style={{ color: "var(--slate)" }}>No jobs match those filters — post the first one.</p>}
         </div>
       )}
+
+      <Toast msg={toast} onDone={() => setToast("")} />
     </div>
   );
 }

@@ -1,18 +1,26 @@
 import React, { useEffect, useState } from "react";
 import { api, eventDate } from "../api.js";
 import { useAuth } from "../App.jsx";
-import { Spinner, Icon } from "../ui.jsx";
+import { Spinner, Icon, Toast } from "../ui.jsx";
 
 export default function Events() {
   const { me } = useAuth();
   const [events, setEvents] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: "", event_date: "", location: "", description: "" });
+  const [toast, setToast] = useState("");
 
   const load = () => api.get("/events").then(setEvents);
   useEffect(() => { load(); }, []);
 
-  const rsvp = async (id) => { await api.post(`/events/${id}/rsvp`); load(); };
+  // The button label was the only sign an RSVP registered, so testers read it as broken.
+  const rsvp = async (ev) => {
+    await api.post(`/events/${ev.id}/rsvp`);
+    setToast(ev.my_rsvp
+      ? `You're no longer going to ${ev.title}.`
+      : `You're going to ${ev.title}. The alumni office can see your RSVP.`);
+    load();
+  };
   const create = async (e) => {
     e.preventDefault();
     await api.post("/events", { ...form, event_date: form.event_date.replace("T", " ") });
@@ -61,7 +69,7 @@ export default function Events() {
                   <h3>{ev.title}</h3>
                   <div className="where">{d.full}{ev.location ? ` · ${ev.location}` : ""}</div>
                   {ev.description && <div className="desc">{ev.description}</div>}
-                  <button className={`btn sm ${ev.my_rsvp ? "ghost" : ""}`} onClick={() => rsvp(ev.id)}>
+                  <button className={`btn sm ${ev.my_rsvp ? "ghost" : ""}`} onClick={() => rsvp(ev)}>
                     {ev.my_rsvp ? "Going ✓ (tap to cancel)" : "RSVP"}
                   </button>
                   <span className="going">{ev.going} going</span>
@@ -73,6 +81,8 @@ export default function Events() {
           {events.length === 0 && <p style={{ color: "var(--slate)" }}>No upcoming events{me.role === "admin" ? " — create the first one." : " yet."}</p>}
         </div>
       )}
+
+      <Toast msg={toast} onDone={() => setToast("")} />
     </div>
   );
 }
