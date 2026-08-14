@@ -200,7 +200,7 @@ export function Layout() {
 
   const NAV = [
     ["/", "home", "Home"], ["/directory", "users", "Directory"], ["/jobs", "briefcase", "Jobs"],
-    ["/marketplace", "store", "Marketplace"], ["/mentoring", "mentor", "Mentoring"],
+    ["/marketplace", "store", "Alumni Marketplace"], ["/mentoring", "mentor", "Mentoring"],
     ["/events", "calendar", "Events"], ["/messages", "chat", "Messages"],
   ];
 

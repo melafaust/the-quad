@@ -207,6 +207,18 @@ router.put("/connections/:id", async (req, res) => {
   res.json({ ok: true, status });
 });
 
+// Withdraw a request you sent, or disconnect from someone you're connected to. Deleting the
+// row rather than marking it declined means either side can connect again later.
+router.delete("/connections/:userId", async (req, res) => {
+  const other = Number(req.params.userId);
+  const c = await connectionBetween(req.user.id, other);
+  if (!c) return res.status(404).json({ error: "You aren't connected to that member" });
+  if (c.status === "pending" && c.requester_id !== req.user.id)
+    return res.status(403).json({ error: "Decline the request instead" });
+  await db.run("DELETE FROM connections WHERE id=?", c.id);
+  res.json({ ok: true, was: c.status });
+});
+
 router.get("/connections", async (req, res) => {
   const me = req.user.id;
   const accepted = await db.all(`
@@ -306,11 +318,15 @@ router.delete("/jobs/:id", async (req, res) => {
 /* ---------------- marketplace ---------------- */
 
 router.get("/listings", async (req, res) => {
-  const { kind, category, country } = req.query;
-  const where = ["l.status='live'"], vals = [];
+  const { kind, category, country, status } = req.query;
+  // "closed" returns your own archive, so a closed listing stays reachable instead of
+  // disappearing the moment you mark it done.
+  const where = [], vals = [];
+  if (status === "closed") { where.push("l.status='closed'", "l.owner_id=?"); vals.push(req.user.id); }
+  else where.push("l.status='live'");
   if (kind) { where.push("l.kind=?"); vals.push(kind); }
   if (category) { where.push("l.category=?"); vals.push(category); }
-  if (country) { where.push("l.country=?"); vals.push(country); }
+  if (country) { where.push("LOWER(TRIM(l.country))=LOWER(TRIM(?))"); vals.push(country); }
   res.json(await db.all(`SELECT l.*, ${author("u")} FROM listings l JOIN users u ON u.id=l.owner_id
     WHERE ${where.join(" AND ")} ORDER BY l.created_at DESC LIMIT 100`, vals));
 });
@@ -319,6 +335,9 @@ router.post("/listings", async (req, res) => {
   const b = req.body;
   if (!b.title || !["offer", "request"].includes(b.kind) || !["service", "product"].includes(b.category))
     return res.status(400).json({ error: "Title, kind (offer/request) and category (service/product) are required" });
+  // Country feeds the marketplace filter — a listing without one never shows up there.
+  if (!String(b.description || "").trim()) return res.status(400).json({ error: "Add a description so members know what they're enquiring about" });
+  if (!String(b.country || "").trim()) return res.status(400).json({ error: "Country is required — it's how members filter the marketplace" });
   const vals = ["title","description","tags","price_note","country","city"].map((k) => String(b[k] || "").slice(0, 1000));
   const info = await db.run(`INSERT INTO listings (owner_id,kind,category,title,description,tags,price_note,country,city)
     VALUES (?,?,?,?,?,?,?,?,?) RETURNING id`, req.user.id, b.kind, b.category, vals);
@@ -330,6 +349,14 @@ router.put("/listings/:id/close", async (req, res) => {
   if (!l) return res.status(404).json({ error: "Listing not found" });
   if (l.owner_id !== req.user.id && req.user.role !== "admin") return res.status(403).json({ error: "Not your listing" });
   await db.run("UPDATE listings SET status='closed' WHERE id=?", req.params.id);
+  res.json({ ok: true });
+});
+
+router.put("/listings/:id/reopen", async (req, res) => {
+  const l = await db.get("SELECT owner_id FROM listings WHERE id=?", req.params.id);
+  if (!l) return res.status(404).json({ error: "Listing not found" });
+  if (l.owner_id !== req.user.id && req.user.role !== "admin") return res.status(403).json({ error: "Not your listing" });
+  await db.run("UPDATE listings SET status='live' WHERE id=?", req.params.id);
   res.json({ ok: true });
 });
 
@@ -524,29 +551,61 @@ router.get("/admin/invites", async (req, res) => {
 });
 
 router.post("/admin/invites", async (req, res) => {
-  const { name, email, brand, programme, grad_year, country } = req.body;
+  const t = (v) => String(v || "").trim();
+  const name = t(req.body.name), email = t(req.body.email);
+  const brand = t(req.body.brand), programme = t(req.body.programme);
+  const country = t(req.body.country);
   if (!name || !email || !brand || !programme) return res.status(400).json({ error: "Name, email, brand and programme are required" });
+  if (await db.get("SELECT 1 FROM invites WHERE LOWER(email)=LOWER(?) AND status!='revoked'", email))
+    return res.status(409).json({ error: "That email already has an open invite" });
+  if (await db.get("SELECT 1 FROM users WHERE LOWER(email)=LOWER(?)", email))
+    return res.status(409).json({ error: "That email is already a member" });
   const code = inviteCode();
   await db.run("INSERT INTO invites (code,name,email,brand,programme,grad_year,country) VALUES (?,?,?,?,?,?,?)",
-    code, name, email, brand, programme, grad_year || null, country || "");
+    code, name, email, brand, programme, Number(req.body.grad_year) || null, country);
   res.json({ code });
 });
 
+// Split one CSV line, honouring "quoted, fields" so a comma inside a programme name
+// doesn't shift every column after it.
+function csvCells(line) {
+  const out = [];
+  let cur = "", inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') inQuotes = false;
+      else cur += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === ",") { out.push(cur); cur = ""; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out.map((c) => c.trim());
+}
+
 // CSV import: client posts {csv:"name,email,brand,programme,grad_year,country\n..."}
 router.post("/admin/invites/import", async (req, res) => {
-  const text = String(req.body.csv || "").trim();
+  // Excel writes a byte-order mark at the start of a CSV, which turned the first header
+  // into "﻿name" and made every upload fail the header check.
+  const text = String(req.body.csv || "").replace(/^﻿/, "").trim();
   if (!text) return res.status(400).json({ error: "Empty CSV" });
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
-  const header = lines[0].toLowerCase().split(",").map((h) => h.trim());
+  const header = csvCells(lines[0]).map((h) => h.toLowerCase());
   const need = ["name", "email", "brand", "programme"];
-  if (!need.every((h) => header.includes(h)))
-    return res.status(400).json({ error: `CSV header must include: ${need.join(", ")} (optional: grad_year, country)` });
+  const missing = need.filter((h) => !header.includes(h));
+  if (missing.length)
+    return res.status(400).json({ error: `CSV header is missing: ${missing.join(", ")}. Found: ${header.join(", ")}` });
   const col = (row, key) => { const i = header.indexOf(key); return i >= 0 ? (row[i] || "").trim() : ""; };
   let created = 0, skipped = [];
+  const seen = new Set();
   await db.transaction(async (tx) => {
     for (const line of lines.slice(1)) {
-      const row = line.split(",").map((c) => c.trim());
+      const row = csvCells(line);
       const email = col(row, "email");
+      if (email && seen.has(email.toLowerCase())) { skipped.push(email + " (duplicated in this file)"); continue; }
+      if (email) seen.add(email.toLowerCase());
       if (!email || !col(row, "name")) { skipped.push(line); continue; }
       if (await tx.get("SELECT 1 FROM invites WHERE LOWER(email)=LOWER(?) AND status!='revoked'", email) ||
           await tx.get("SELECT 1 FROM users WHERE LOWER(email)=LOWER(?)", email)) { skipped.push(email + " (already invited or a member)"); continue; }

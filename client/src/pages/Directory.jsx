@@ -31,6 +31,15 @@ export default function Directory() {
     setToast(`Request sent to ${name}. They'll see it in their notifications and you'll be connected once they accept.`);
     load();
   };
+  const unconnect = async (m) => {
+    const sent = m.conn_status === "pending";
+    if (!confirm(sent
+      ? `Cancel your connection request to ${m.name}?`
+      : `Disconnect from ${m.name}? You can send a new request later.`)) return;
+    await api.del(`/connections/${m.id}`);
+    setToast(sent ? `Request to ${m.name} cancelled.` : `You're no longer connected to ${m.name}.`);
+    load();
+  };
   const actPending = async (id, accept, name) => {
     await api.put(`/connections/${id}`, { accept });
     setToast(accept ? `You're now connected with ${name}.` : `Request from ${name} declined.`);
@@ -102,12 +111,29 @@ export default function Directory() {
               <Link to={`/members/${m.id}`}><b>{m.name}</b></Link>
               <div className="role">{[m.job_title, m.company].filter(Boolean).join(" · ") || "—"}</div>
               <Badge brand={m.brand} programme={m.programme} />
-              {m.mentoring_role && m.mentoring_role !== "mentee" && <span className="badge b-ok" style={{ marginTop: 4 }}>Open to mentor</span>}
+              {/* This used to be a plain span that looked like a button and did nothing.
+                  It now goes to the profile, where the mentorship request form lives. */}
+              {m.mentoring_role && m.mentoring_role !== "mentee" && (
+                <Link to={`/members/${m.id}`} className="badge b-ok mentor-link" style={{ marginTop: 4 }}
+                  title={`See ${m.name.split(" ")[0]}'s mentoring profile and request mentorship`}>
+                  Open to mentor →
+                </Link>
+              )}
               <div className="loc">{[m.city, m.country].filter(Boolean).join(", ")}</div>
               <div className="mrow-actions">
                 {!m.conn_status && <button className="btn sm" onClick={() => connect(m.id, m.name)}>Connect</button>}
-                {m.conn_status === "pending" && <button className="btn ghost sm" disabled title="Waiting for them to accept">Pending</button>}
-                {m.conn_status === "accepted" && <span className="badge b-ok">Connected</span>}
+                {m.conn_status === "pending" && m.conn_requester === me.id && (
+                  <button className="btn ghost sm" onClick={() => unconnect(m)} title="Cancel this request">Pending · cancel</button>
+                )}
+                {m.conn_status === "pending" && m.conn_requester !== me.id && (
+                  <button className="btn ghost sm" disabled title="They asked to connect — accept from your notifications">Awaiting you</button>
+                )}
+                {m.conn_status === "accepted" && (
+                  <>
+                    <span className="badge b-ok">Connected</span>
+                    <button className="link-btn red" onClick={() => unconnect(m)}>Disconnect</button>
+                  </>
+                )}
                 {m.conn_status === "declined" && <button className="btn ghost sm" disabled>Declined</button>}
                 {isLinkedIn(m.linkedin_url) && <a className="li-btn" href={m.linkedin_url} target="_blank" rel="noreferrer" title={`${m.name} on LinkedIn`}>in</a>}
               </div>

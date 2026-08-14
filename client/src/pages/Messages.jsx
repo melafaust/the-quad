@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { api, timeAgo } from "../api.js";
 import { useAuth } from "../App.jsx";
 import { Avatar, Badge, Spinner } from "../ui.jsx";
@@ -14,6 +14,7 @@ export default function Messages() {
   const [thread, setThread] = useState(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [params, setParams] = useSearchParams();
   const bottomRef = useRef(null);
 
   const loadConvs = () => api.get("/messages").then(setConvs);
@@ -21,6 +22,11 @@ export default function Messages() {
 
   useEffect(() => { loadConvs(); }, [userId]);
   useEffect(() => { setThread(null); loadThread(); }, [userId]);
+  // Marketplace enquiries arrive with an opener already written.
+  useEffect(() => {
+    const d = params.get("draft");
+    if (d) { setDraft(d.slice(0, MESSAGE_MAX)); setParams({}, { replace: true }); }
+  }, [params, setParams]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ block: "end" }); }, [thread]);
 
   // Light polling so replies appear without a manual refresh.

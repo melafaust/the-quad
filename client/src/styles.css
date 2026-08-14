@@ -464,3 +464,7 @@ table.adm .mono { font-family: Consolas, monospace; font-size: 12px; color: var(
   border: 0; color: inherit; flex: none; }
 .search-go:hover { color: #E6EDF5; }
 .search-go:focus-visible { outline: 2px solid #7DD3FC; outline-offset: 2px; border-radius: 4px; }
+
+/* "Open to mentor" is a link to the profile, not a dead badge */
+.mentor-link { text-decoration: none; cursor: pointer; }
+.mentor-link:hover { filter: brightness(.94); }

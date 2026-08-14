@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, timeAgo } from "../api.js";
 import { useAuth } from "../App.jsx";
-import { Avatar, Spinner, Icon } from "../ui.jsx";
+import { Avatar, Spinner, Icon, Toast } from "../ui.jsx";
 
 const empty = { kind: "offer", category: "service", title: "", description: "", tags: "", price_note: "", country: "", city: "" };
 
@@ -15,9 +15,13 @@ export default function Marketplace() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(empty);
   const [filters, setFilters] = useState(null);
+  const [toast, setToast] = useState("");
+  const [posting, setPosting] = useState(false);
 
   const load = () => {
-    const qs = new URLSearchParams({ kind: tab, ...Object.fromEntries(Object.entries(f).filter(([, v]) => v)) });
+    const qs = tab === "closed"
+      ? new URLSearchParams({ status: "closed" })
+      : new URLSearchParams({ kind: tab, ...Object.fromEntries(Object.entries(f).filter(([, v]) => v)) });
     api.get(`/listings?${qs}`).then(setListings);
   };
   useEffect(() => { api.get("/filters").then(setFilters); }, []);
@@ -25,12 +29,29 @@ export default function Marketplace() {
 
   const post = async (e) => {
     e.preventDefault();
-    await api.post("/listings", form);
-    setForm(empty); setShowForm(false); setTab(form.kind); load();
+    if (posting) return;
+    setPosting(true);
+    try {
+      await api.post("/listings", form);
+      setToast("Listing published.");
+      setForm(empty); setShowForm(false); setTab(form.kind); load();
+    } finally { setPosting(false); }
   };
-  const close = async (id) => { await api.put(`/listings/${id}/close`); load(); };
+  // Closing used to happen silently, and a closed listing then vanished from the only view
+  // there was, so it looked like the listing had been deleted.
+  const close = async (l) => {
+    if (!confirm(`Mark "${l.title}" as closed? It moves to your Closed listings and stops showing to other members.`)) return;
+    await api.put(`/listings/${l.id}/close`);
+    setToast(`"${l.title}" is closed. Find it under Closed listings.`);
+    load();
+  };
+  const reopen = async (l) => {
+    await api.put(`/listings/${l.id}/reopen`);
+    setToast(`"${l.title}" is live again.`);
+    load();
+  };
   const remove = async (id) => {
-    if (!confirm("Remove this listing?")) return;
+    if (!confirm("Remove this listing? This can't be undone.")) return;
     await api.del(`/listings/${id}`); load();
   };
 
@@ -39,7 +60,7 @@ export default function Marketplace() {
   return (
     <div>
       <div className="page-head">
-        <h1>Marketplace</h1>
+        <h1>Alumni Marketplace</h1>
         <span className="sub">Offer your services and products, or ask the community for what you need. Deals happen member to member — The Quad never handles money.</span>
         <span className="spacer" />
         <button className="btn" onClick={() => setShowForm(!showForm)}><Icon name="plus" size={14} /> New listing</button>
@@ -65,14 +86,22 @@ export default function Marketplace() {
             </div>
           </div>
           <div className="field"><label>Title *</label><input value={form.title} onChange={setL("title")} required placeholder={form.kind === "request" ? "Looking for: …" : "e.g. HR policy audit for SMEs"} /></div>
-          <div className="field"><label>Description</label><textarea value={form.description} onChange={setL("description")} /></div>
+          <div className="field"><label>Description *</label><textarea value={form.description} onChange={setL("description")} required placeholder="What's involved, who it's for, anything a member should know before enquiring." /></div>
           <div className="form-row">
             <div className="field"><label>Price / budget note</label><input value={form.price_note} onChange={setL("price_note")} placeholder="From US$500 · Budget on enquiry" /></div>
             <div className="field"><label>Tags (comma-separated)</label><input value={form.tags} onChange={setL("tags")} placeholder="Consulting, HR" /></div>
-            <div className="field"><label>Country</label><input value={form.country} onChange={setL("country")} /></div>
+            {/* Country drives the marketplace filter, so a listing without one was invisible
+                to anyone browsing by country. */}
+            <div className="field">
+              <label>Country *</label>
+              <select value={form.country} onChange={setL("country")} required>
+                <option value="">Select a country…</option>
+                {filters?.countries.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
             <div className="field"><label>City</label><input value={form.city} onChange={setL("city")} /></div>
           </div>
-          <button className="btn">Publish listing</button>{" "}
+          <button className="btn" disabled={posting}>{posting ? "Publishing…" : "Publish listing"}</button>{" "}
           <button type="button" className="btn ghost" onClick={() => setShowForm(false)}>Cancel</button>
         </form>
       )}
@@ -80,9 +109,10 @@ export default function Marketplace() {
       <div className="dir-tabs">
         <button className={`dtab ${tab === "offer" ? "on" : ""}`} onClick={() => setTab("offer")}>Offers</button>
         <button className={`dtab ${tab === "request" ? "on" : ""}`} onClick={() => setTab("request")}>Requests</button>
+        <button className={`dtab ${tab === "closed" ? "on" : ""}`} onClick={() => setTab("closed")}>My closed listings</button>
       </div>
 
-      <div className="filters">
+      <div className="filters" style={{ display: tab === "closed" ? "none" : undefined }}>
         <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
           <option value="">Type: services & products</option>
           <option value="service">Services</option>
@@ -111,19 +141,38 @@ export default function Marketplace() {
                   {(l.city || l.country) && ` · ${[l.city, l.country].filter(Boolean).join(", ")}`} · {timeAgo(l.created_at)}</span>
               </div>
               <div className="foot">
+                {/* Carry the listing title into the message box so the enquiry doesn't start
+                    from a blank screen and the seller knows what it's about. */}
                 {l.owner_id !== me.id && (
-                  <button className="btn sm" onClick={() => nav(`/messages/${l.author_id}`)}>
+                  <button className="btn sm" onClick={() => nav(
+                    `/messages/${l.author_id}?draft=${encodeURIComponent(
+                      l.kind === "offer"
+                        ? `Hi ${l.author_name.split(" ")[0]} — I'm interested in "${l.title}". Could you tell me more?`
+                        : `Hi ${l.author_name.split(" ")[0]} — I saw you're looking for "${l.title}". I think I can help.`
+                    )}`
+                  )}>
                     {l.kind === "offer" ? "Enquire" : "I can help"}
                   </button>
                 )}
-                {l.owner_id === me.id && <button className="btn ghost sm" onClick={() => close(l.id)}>Mark as closed</button>}
+                {l.owner_id === me.id && l.status !== "closed" && (
+                  <button className="btn ghost sm" onClick={() => close(l)}>Mark as closed</button>
+                )}
+                {l.owner_id === me.id && l.status === "closed" && (
+                  <button className="btn ghost sm" onClick={() => reopen(l)}>Reopen listing</button>
+                )}
                 {(l.owner_id === me.id || me.role === "admin") && <button className="link-btn red" onClick={() => remove(l.id)}>Remove</button>}
               </div>
             </div>
           ))}
-          {listings.length === 0 && <p style={{ color: "var(--slate)" }}>Nothing here yet — be the first to post.</p>}
+          {listings.length === 0 && (
+            <p style={{ color: "var(--slate)" }}>
+              {tab === "closed" ? "You haven't closed any listings yet." : "Nothing here yet — be the first to post."}
+            </p>
+          )}
         </div>
       )}
+
+      <Toast msg={toast} onDone={() => setToast("")} />
     </div>
   );
 }
