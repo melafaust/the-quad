@@ -56,6 +56,10 @@ function safeUrl(u) {
 }
 const BAD_URL = "Links must start with http:// or https://";
 
+// Upper bound on how many mentees one mentor can take on. This is a guard against a
+// runaway number, not a product rule — each mentor sets their own number under it.
+const MENTEE_CAP = 20;
+
 // A LinkedIn link is only useful if it points at an actual profile. Members were pasting
 // bare handles, company pages and half-remembered URLs, which showed a working "in" icon
 // that led to a 404. Accept the common shapes, normalise them, reject the rest.
@@ -390,12 +394,17 @@ router.put("/me/mentoring", async (req, res) => {
     return res.json({ ok: true });
   }
   if (!["mentor", "mentee", "both"].includes(role)) return res.status(400).json({ error: "Pick mentor, mentee or both" });
+  // Matching is industry-based, so a mentor with no industries never surfaces for anyone.
+  if (role !== "mentee" && !String(industries || "").trim())
+    return res.status(400).json({ error: "Add at least one industry — mentees are matched to you by industry" });
+  if (role !== "mentee" && !String(expertise || "").trim())
+    return res.status(400).json({ error: "Add your expertise so mentees know what you can help with" });
   await db.run(`INSERT INTO mentor_profiles (user_id,role,industries,expertise,capacity,note,active)
     VALUES (?,?,?,?,?,?,TRUE)
     ON CONFLICT (user_id) DO UPDATE SET role=EXCLUDED.role, industries=EXCLUDED.industries,
       expertise=EXCLUDED.expertise, capacity=EXCLUDED.capacity, note=EXCLUDED.note, active=TRUE`,
     req.user.id, role, String(industries || "").slice(0, 300), String(expertise || "").slice(0, 300),
-    Math.max(0, Math.min(10, Number(capacity) || 0)), String(note || "").slice(0, 500));
+    Math.max(0, Math.min(MENTEE_CAP, Number(capacity) || 0)), String(note || "").slice(0, 500));
   res.json(await db.get("SELECT * FROM mentor_profiles WHERE user_id=?", req.user.id));
 });
 
@@ -440,6 +449,15 @@ router.get("/events", async (req, res) => {
     SELECT e.*, (SELECT COUNT(*) FROM rsvps r WHERE r.event_id=e.id) AS going,
       EXISTS(SELECT 1 FROM rsvps r WHERE r.event_id=e.id AND r.user_id=@me) AS my_rsvp
     FROM events e WHERE e.event_date >= NOW() - INTERVAL '12 hours' ORDER BY e.event_date`, { me: req.user.id }));
+});
+
+// Who is actually coming. The count alone told the alumni office nothing about who to
+// expect or follow up with.
+router.get("/events/:id/rsvps", requireAdmin, async (req, res) => {
+  res.json(await db.all(`SELECT u.id, u.name, u.email, u.job_title, u.company, u.brand,
+      u.programme, u.country, u.avatar_file, r.created_at
+    FROM rsvps r JOIN users u ON u.id=r.user_id
+    WHERE r.event_id=? ORDER BY r.created_at`, req.params.id));
 });
 
 router.post("/events", requireAdmin, async (req, res) => {

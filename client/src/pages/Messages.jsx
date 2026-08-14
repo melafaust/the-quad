@@ -15,9 +15,11 @@ export default function Messages() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [params, setParams] = useSearchParams();
+  const [people, setPeople] = useState(null);
   const bottomRef = useRef(null);
 
   const loadConvs = () => api.get("/messages").then(setConvs);
+  useEffect(() => { api.get("/members").then((d) => setPeople(d.members)).catch(() => setPeople([])); }, []);
   const loadThread = () => userId && api.get(`/messages/${userId}`).then(setThread);
 
   useEffect(() => { loadConvs(); }, [userId]);
@@ -51,9 +53,19 @@ export default function Messages() {
   return (
     <div className="msg-grid">
       <div className="card conv-list">
+        {/* You used to be able to reach a thread only from someone's profile, so if the
+            other person hadn't written first there was no visible way to start. */}
+        <div className="conv-new">
+          <select value="" onChange={(e) => e.target.value && nav(`/messages/${e.target.value}`)}>
+            <option value="">＋ New message to…</option>
+            {(people || []).filter((p) => p.id !== me.id).map((p) => (
+              <option key={p.id} value={p.id}>{p.name}{p.company ? ` · ${p.company}` : ""}</option>
+            ))}
+          </select>
+        </div>
         {convs === null ? <Spinner /> : convs.length === 0 ? (
           <p style={{ padding: 18, fontSize: 13, color: "var(--slate)" }}>
-            No conversations yet. Open any member's profile and hit Message.
+            No conversations yet. Pick someone from "New message" above, or open any member's profile and hit Message.
           </p>
         ) : convs.map((c) => (
           <div key={c.partner_id} className={`conv ${String(c.partner_id) === userId ? "on" : ""}`}

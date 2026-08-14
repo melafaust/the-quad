@@ -158,18 +158,22 @@ export default function ProfileEdit() {
                 </select>
               </div>
               <div className="field">
-                <label>Mentee capacity (if mentoring)</label>
-                <input type="number" min="0" max="10" value={mentor.capacity} onChange={setM("capacity")} />
+                <label>How many mentees will you take?</label>
+                <input type="number" min="0" max="20" value={mentor.capacity} onChange={setM("capacity")} />
+                <small className="hint-inline">Your own limit — you stop appearing as available once you hit it. Up to 20.</small>
               </div>
             </div>
             <div className="form-row">
               <div className="field">
-                <label>Industries (comma-separated)</label>
-                <input value={mentor.industries} onChange={setM("industries")} placeholder="Human Resources, Finance" />
+                <label>Industries (comma-separated){mentor.role !== "mentee" ? " *" : ""}</label>
+                <input value={mentor.industries} onChange={setM("industries")}
+                  required={mentor.role !== "mentee"} placeholder="Human Resources, Finance" />
+                {mentor.role !== "mentee" && <small className="hint-inline">Mentees are matched to you by industry — without this you won't appear in their search.</small>}
               </div>
               <div className="field">
-                <label>Expertise tags</label>
-                <input value={mentor.expertise} onChange={setM("expertise")} placeholder="HR leadership, People analytics" />
+                <label>Expertise tags{mentor.role !== "mentee" ? " *" : ""}</label>
+                <input value={mentor.expertise} onChange={setM("expertise")}
+                  required={mentor.role !== "mentee"} placeholder="HR leadership, People analytics" />
               </div>
             </div>
             <div className="field">
