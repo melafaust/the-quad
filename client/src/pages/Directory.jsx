@@ -2,7 +2,11 @@ import React, { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api.js";
 import { useAuth } from "../App.jsx";
-import { Avatar, Badge, Spinner } from "../ui.jsx";
+import { Avatar, Badge, Spinner, Toast } from "../ui.jsx";
+
+// Only show the "in" icon for links that actually point at a LinkedIn profile. Older
+// profiles hold handles and company pages that rendered a working icon leading to a 404.
+const isLinkedIn = (u) => /^https?:\/\/([a-z]{2,3}\.)?(www\.)?linkedin\.com\/in\/[^/?#]+/i.test(String(u || ""));
 
 export default function Directory() {
   const { me } = useAuth();
@@ -12,6 +16,7 @@ export default function Directory() {
   const [tab, setTab] = useState("");
   const [f, setF] = useState({ programme: "", industry: "", country: "", mentoring: "", q: params.get("q") || "" });
   const [pending, setPending] = useState([]);
+  const [toast, setToast] = useState("");
 
   const load = () => {
     const qs = new URLSearchParams();
@@ -25,9 +30,14 @@ export default function Directory() {
   useEffect(load, [tab, f]);
   useEffect(() => { setF((old) => ({ ...old, q: params.get("q") || "" })); }, [params]);
 
-  const connect = async (id) => { await api.post(`/connections/${id}`); load(); };
-  const actPending = async (id, accept) => {
+  const connect = async (id, name) => {
+    await api.post(`/connections/${id}`);
+    setToast(`Request sent to ${name}. They'll see it in their notifications and you'll be connected once they accept.`);
+    load();
+  };
+  const actPending = async (id, accept, name) => {
     await api.put(`/connections/${id}`, { accept });
+    setToast(accept ? `You're now connected with ${name}.` : `Request from ${name} declined.`);
     api.get("/connections").then((c) => setPending(c.pending));
     load();
   };
@@ -53,8 +63,8 @@ export default function Directory() {
                 <Link to={`/members/${p.author_id}`}><b>{p.author_name}</b></Link>
                 <span>{[p.author_job_title, p.author_company].filter(Boolean).join(" · ")}</span>
               </div>
-              <button className="btn-mini" onClick={() => actPending(p.connection_id, true)}>Accept</button>
-              <button className="btn-mini ghost" onClick={() => actPending(p.connection_id, false)}>Decline</button>
+              <button className="btn-mini" onClick={() => actPending(p.connection_id, true, p.author_name)}>Accept</button>
+              <button className="btn-mini ghost" onClick={() => actPending(p.connection_id, false, p.author_name)}>Decline</button>
             </div>
           ))}
         </div>
@@ -99,17 +109,19 @@ export default function Directory() {
               {m.mentoring_role && m.mentoring_role !== "mentee" && <span className="badge b-ok" style={{ marginTop: 4 }}>Open to mentor</span>}
               <div className="loc">{[m.city, m.country].filter(Boolean).join(", ")}</div>
               <div className="mrow-actions">
-                {!m.conn_status && <button className="btn sm" onClick={() => connect(m.id)}>Connect</button>}
-                {m.conn_status === "pending" && <button className="btn ghost sm" disabled>Pending</button>}
+                {!m.conn_status && <button className="btn sm" onClick={() => connect(m.id, m.name)}>Connect</button>}
+                {m.conn_status === "pending" && <button className="btn ghost sm" disabled title="Waiting for them to accept">Pending</button>}
                 {m.conn_status === "accepted" && <span className="badge b-ok">Connected</span>}
                 {m.conn_status === "declined" && <button className="btn ghost sm" disabled>Declined</button>}
-                {m.linkedin_url && <a className="li-btn" href={m.linkedin_url} target="_blank" rel="noreferrer" title="LinkedIn profile">in</a>}
+                {isLinkedIn(m.linkedin_url) && <a className="li-btn" href={m.linkedin_url} target="_blank" rel="noreferrer" title={`${m.name} on LinkedIn`}>in</a>}
               </div>
             </div>
           ))}
           {data.members.length === 0 && <p style={{ color: "var(--slate)" }}>No members match those filters.</p>}
         </div>
       )}
+
+      <Toast msg={toast} onDone={() => setToast("")} />
     </div>
   );
 }
