@@ -56,6 +56,20 @@ function safeUrl(u) {
 }
 const BAD_URL = "Links must start with http:// or https://";
 
+// A LinkedIn link is only useful if it points at an actual profile. Members were pasting
+// bare handles, company pages and half-remembered URLs, which showed a working "in" icon
+// that led to a 404. Accept the common shapes, normalise them, reject the rest.
+function linkedInUrl(u) {
+  let s = String(u || "").trim().replace(/\s+/g, "");
+  if (!s) return "";
+  if (!/^https?:\/\//i.test(s)) s = s.replace(/^(www\.)?(linkedin\.com)?\/?/i, "");
+  const handle = s.replace(/^https?:\/\/([a-z]{2,3}\.)?(www\.)?linkedin\.com\/in\//i, "").replace(/^\/?in\//i, "");
+  const slug = handle.split(/[/?#]/)[0];
+  if (!/^[\w\-À-ÿ%]{3,100}$/.test(slug)) return null;
+  return `https://www.linkedin.com/in/${slug}`;
+}
+const BAD_LINKEDIN = "Enter your LinkedIn profile URL (e.g. linkedin.com/in/your-name)";
+
 /* ---------------- me / profiles ---------------- */
 
 router.get("/me", (req, res) => res.json(req.user));
@@ -66,8 +80,8 @@ router.put("/me", async (req, res) => {
   for (const k of allowed) if (k in req.body) {
     let v = String(req.body[k]).slice(0, 500);
     if (k === "linkedin_url") {
-      v = safeUrl(v);
-      if (v === null) return res.status(400).json({ error: BAD_URL });
+      v = linkedInUrl(v);
+      if (v === null) return res.status(400).json({ error: BAD_LINKEDIN });
     }
     sets.push(`${k}=?`); vals.push(v);
   }
@@ -147,7 +161,9 @@ router.get("/members", async (req, res) => {
   if (brand) { where.push("u.brand=?"); vals.push(brand); }
   if (programme) { where.push("u.programme ILIKE ?"); vals.push(`%${programme}%`); }
   if (industry) { where.push("u.industry=?"); vals.push(industry); }
-  if (country) { where.push("u.country=?"); vals.push(country); }
+  // Country is matched case-insensitively: members typed their own, so the same place
+  // exists as "Malaysia" and "MALAYSIA" and an exact match silently drops half of them.
+  if (country) { where.push("LOWER(TRIM(u.country))=LOWER(TRIM(?))"); vals.push(country); }
   if (mentoring === "mentor") where.push("mp.active=TRUE AND mp.role IN ('mentor','both')");
   if (mentoring === "mentee") where.push("mp.active=TRUE AND mp.role IN ('mentee','both')");
   if (q) { where.push("(u.name ILIKE ? OR u.company ILIKE ? OR u.job_title ILIKE ?)"); vals.push(`%${q}%`, `%${q}%`, `%${q}%`); }
@@ -167,7 +183,9 @@ router.get("/members", async (req, res) => {
 router.get("/filters", async (req, res) => {
   res.json({
     industries: (await db.all("SELECT DISTINCT industry v FROM users WHERE industry!='' ORDER BY 1")).map((r) => r.v),
-    countries: (await db.all("SELECT DISTINCT country v FROM users WHERE country!='' ORDER BY 1")).map((r) => r.v),
+    // One entry per country regardless of how each member capitalised it.
+    countries: (await db.all(`SELECT MIN(country) v FROM users WHERE TRIM(country)!=''
+      GROUP BY LOWER(TRIM(country)) ORDER BY 1`)).map((r) => r.v),
     programmes: (await db.all("SELECT DISTINCT programme v FROM users WHERE programme NOT IN ('Alumni Office') ORDER BY 1")).map((r) => r.v),
   });
 });
@@ -569,6 +587,14 @@ router.put("/admin/members/:id", async (req, res) => {
   if ("role" in req.body && ["member", "admin"].includes(req.body.role))
     await db.run("UPDATE users SET role=? WHERE id=?", req.body.role, target.id);
   res.json({ ok: true });
+});
+
+// Outstanding password-reset requests, so the alumni office can pass the member their code.
+router.get("/admin/password-resets", async (req, res) => {
+  res.json(await db.all(`SELECT pr.token, pr.created_at, pr.expires_at, u.name, u.email
+    FROM password_resets pr JOIN users u ON u.id=pr.user_id
+    WHERE pr.used_at IS NULL AND pr.expires_at > NOW()
+    ORDER BY pr.created_at DESC`));
 });
 
 // ── Test Dashboard ────────────────────────────────────────────────────────────

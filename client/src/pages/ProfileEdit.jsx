@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, setToken } from "../api.js";
 import { useAuth } from "../App.jsx";
-import { Avatar, Badge, ErrorNote } from "../ui.jsx";
+import { Avatar, Badge, Confirm, ErrorNote } from "../ui.jsx";
 
 const FIELDS = [
   ["name", "Full name"], ["job_title", "Job title"], ["company", "Company"],
@@ -59,6 +59,7 @@ export default function ProfileEdit() {
   };
 
   const signOut = () => { setToken(null); window.location.href = "/login"; };
+  const [confirmOut, setConfirmOut] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const setM = (k) => (e) => setMentor({ ...mentor, [k]: e.target.value });
 
@@ -67,8 +68,17 @@ export default function ProfileEdit() {
       <div className="page-head">
         <h1>My profile</h1>
         <span className="spacer" />
-        <button className="btn danger sm" onClick={signOut}>Sign out</button>
+        <button className="btn danger sm" onClick={() => setConfirmOut(true)}>Sign out</button>
       </div>
+
+      <Confirm
+        open={confirmOut}
+        title="Sign out of The Quad?"
+        body="You'll need to sign in again with your email and password."
+        confirmLabel="Sign out"
+        onConfirm={signOut}
+        onCancel={() => setConfirmOut(false)}
+      />
 
       <ErrorNote msg={err} />
       {msg && <div className="card" style={{ padding: "10px 16px", marginBottom: 14, fontSize: 13, color: "#15803D" }}>{msg}</div>}

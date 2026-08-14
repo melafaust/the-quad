@@ -170,6 +170,38 @@ function Invites() {
   );
 }
 
+// Members who asked to reset their password. No mail provider is wired up, so the
+// alumni office reads the code off this list and passes it to the member.
+function ResetRequests() {
+  const [rows, setRows] = useState(null);
+  useEffect(() => { api.get("/admin/password-resets").then(setRows).catch(() => setRows([])); }, []);
+
+  if (rows === null || rows.length === 0) return null;
+  return (
+    <div className="card" style={{ padding: "14px 16px", marginBottom: 14 }}>
+      <h4 style={{ fontSize: 13, marginBottom: 4 }}>Password reset requests</h4>
+      <p style={{ fontSize: 12, color: "var(--slate)", marginBottom: 10 }}>
+        Give the member their code. Each one works once and expires after 24 hours.
+      </p>
+      <div className="table-wrap">
+        <table className="adm">
+          <thead><tr><th>Member</th><th>Email</th><th>Reset code</th><th>Requested</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.token}>
+                <td><b>{r.name}</b></td>
+                <td>{r.email}</td>
+                <td><code>{r.token}</code></td>
+                <td>{new Date(r.created_at).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function Members() {
   const [members, setMembers] = useState(null);
   const load = () => api.get("/admin/members").then(setMembers);
@@ -185,6 +217,8 @@ function Members() {
   };
 
   return (
+    <>
+    <ResetRequests />
     <div className="card" style={{ padding: "8px 6px" }}>
       <div className="table-wrap">
         {members === null ? <Spinner /> : (
@@ -216,6 +250,7 @@ function Members() {
         )}
       </div>
     </div>
+    </>
   );
 }
 

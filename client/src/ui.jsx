@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { NavLink, Link, Outlet, useNavigate, useLocation } from "react-router-dom";
-import { api } from "./api.js";
+import { api, setToken } from "./api.js";
 import { useAuth } from "./App.jsx";
 
 /* ---------- icons ---------- */
@@ -78,6 +78,48 @@ export const Badge = ({ brand, programme, year }) => (
 export const Spinner = () => <div className="spinner">Loading…</div>;
 export const ErrorNote = ({ msg }) => (msg ? <div className="error-note">{msg}</div> : null);
 
+/* ---------- toast ---------- */
+export function Toast({ msg, onDone, ms = 5000 }) {
+  useEffect(() => {
+    if (!msg) return;
+    const t = setTimeout(onDone, ms);
+    return () => clearTimeout(t);
+  }, [msg, ms, onDone]);
+  if (!msg) return null;
+  return (
+    <div className="toast" role="status" aria-live="polite">
+      <Icon name="check" size={15} stroke={2.6} />
+      <span>{msg}</span>
+      <button className="toast-x" onClick={onDone} aria-label="Dismiss">
+        <Icon name="x" size={12} stroke={2.6} />
+      </button>
+    </div>
+  );
+}
+
+/* ---------- confirm dialog ---------- */
+export function Confirm({ open, title, body, confirmLabel = "Confirm", onConfirm, onCancel }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => e.key === "Escape" && onCancel();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
+  if (!open) return null;
+  return (
+    <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+        <h4>{title}</h4>
+        {body && <p>{body}</p>}
+        <div className="modal-actions">
+          <button className="btn ghost sm" onClick={onCancel}>Cancel</button>
+          <button className="btn danger sm" onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- notifications bell ---------- */
 function Bell() {
   const [open, setOpen] = useState(false);
@@ -140,7 +182,10 @@ export function Layout() {
   const location = useLocation();
   const [q, setQ] = useState("");
   const [unread, setUnread] = useState(0);
+  const [confirmOut, setConfirmOut] = useState(false);
   const fileRef = useRef(null);
+
+  const signOut = () => { setToken(null); window.location.href = "/login"; };
 
   useEffect(() => { api.get("/messages/unread-count").then((r) => setUnread(r.unread)).catch(() => {}); }, [location]);
 
@@ -221,6 +266,9 @@ export function Layout() {
               <div className="role">{[me.job_title, me.company].filter(Boolean).join(" · ") || "Complete your profile"}</div>
               <Badge brand={me.brand} programme={me.programme} />
             </div>
+            <button className="signout" onClick={() => setConfirmOut(true)}>
+              <Icon name="out" size={14} /> Sign out
+            </button>
           </div>
         </aside>
 
@@ -228,6 +276,15 @@ export function Layout() {
           <Outlet />
         </main>
       </div>
+
+      <Confirm
+        open={confirmOut}
+        title="Sign out of The Quad?"
+        body="You'll need to sign in again with your email and password."
+        confirmLabel="Sign out"
+        onConfirm={signOut}
+        onCancel={() => setConfirmOut(false)}
+      />
     </div>
   );
 }
