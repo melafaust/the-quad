@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, timeAgo } from "../api.js";
+import { report } from "./Home.jsx";
 import { useAuth } from "../App.jsx";
 import { Spinner, Icon, Toast } from "../ui.jsx";
 
@@ -14,6 +15,7 @@ export default function Jobs() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(empty);
   const [toast, setToast] = useState("");
+  const [editing, setEditing] = useState(null);
 
   // The mailto: link does nothing on machines with no mail client configured, which is
   // how testers hit a dead "Apply by email" button. Copy the address as well so there is
@@ -32,8 +34,22 @@ export default function Jobs() {
 
   const post = async (e) => {
     e.preventDefault();
-    await api.post("/jobs", form);
+    if (editing) await api.put(`/jobs/${editing}`, form);
+    else await api.post("/jobs", form);
     setForm(empty); setShowForm(false); load();
+    setToast(editing ? "Job updated." : "Job posted.");
+    setEditing(null);
+  };
+  // A job could be created and removed but never corrected, so a typo meant delete and
+  // re-post, which lost the original posting date.
+  const edit = (j) => {
+    setForm({
+      title: j.title || "", company: j.company || "", location: j.location || "", country: j.country || "",
+      job_type: j.job_type || "Full-time", salary_range: j.salary_range || "", job_function: j.job_function || "",
+      description: j.description || "", apply_url: j.apply_url || "", apply_email: j.apply_email || "",
+    });
+    setEditing(j.id); setShowForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const remove = async (id) => {
     if (!confirm("Remove this job post? This can't be undone.")) return;
@@ -54,7 +70,7 @@ export default function Jobs() {
 
       {showForm && (
         <form className="card pbox" style={{ marginBottom: 18 }} onSubmit={post}>
-          <h4>New job post</h4>
+          <h4>{editing ? "Edit job post" : "New job post"}</h4>
           <div className="form-row">
             <div className="field"><label>Job title *</label><input value={form.title} onChange={setJ("title")} required /></div>
             <div className="field"><label>Company *</label><input value={form.company} onChange={setJ("company")} required /></div>
@@ -72,8 +88,8 @@ export default function Jobs() {
           </div>
           <div className="field"><label>Apply link (if you have one)</label><input value={form.apply_url} onChange={setJ("apply_url")} placeholder="https://" /></div>
           <div className="field"><label>Description</label><textarea value={form.description} onChange={setJ("description")} /></div>
-          <button className="btn">Publish job</button>{" "}
-          <button type="button" className="btn ghost" onClick={() => setShowForm(false)}>Cancel</button>
+          <button className="btn">{editing ? "Save changes" : "Publish job"}</button>{" "}
+          <button type="button" className="btn ghost" onClick={() => { setShowForm(false); setEditing(null); setForm(empty); }}>Cancel</button>
         </form>
       )}
 
@@ -113,7 +129,13 @@ export default function Jobs() {
                 )}
                 {!j.apply_url && !j.apply_email && <Link className="btn ghost sm" to={`/messages/${j.author_id}`}>Message poster</Link>}
                 {(j.poster_id === me.id || me.role === "admin") && (
-                  <button className="link-btn red" onClick={() => remove(j.id)}>Remove</button>
+                  <>
+                    <button className="link-btn" onClick={() => edit(j)}>Edit</button>
+                    <button className="link-btn red" onClick={() => remove(j.id)}>Remove</button>
+                  </>
+                )}
+                {j.poster_id !== me.id && me.role !== "admin" && (
+                  <button className="link-btn" onClick={() => report("job", j.id)}>Report</button>
                 )}
               </div>
             </div>

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { NavLink, Link, Outlet, useNavigate, useLocation } from "react-router-dom";
-import { api, setToken } from "./api.js";
+import { api, setToken, timeAgo } from "./api.js";
 import { useAuth } from "./App.jsx";
 
 /* ---------- icons ---------- */
@@ -124,34 +124,57 @@ export function Confirm({ open, title, body, confirmLabel = "Confirm", onConfirm
 function Bell() {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState(null);
+  const [notes, setNotes] = useState({ items: [], unread: 0 });
   const ref = useRef(null);
   const nav = useNavigate();
 
-  const load = () => Promise.all([api.get("/connections"), api.get("/mentorships")])
-    .then(([c, m]) => setData({ conns: c.pending, mentees: m.asMentor.filter((x) => x.status === "requested") }));
+  const load = () => Promise.all([api.get("/connections"), api.get("/mentorships"), api.get("/notifications")])
+    .then(([c, m, n]) => {
+      setData({ conns: c.pending, mentees: m.asMentor.filter((x) => x.status === "requested") });
+      setNotes(n);
+    })
+    .catch(() => {});
 
   useEffect(() => { load(); }, []);
+  // Keep the count fresh without a refresh, but gently.
+  useEffect(() => {
+    const t = setInterval(() => api.get("/notifications").then(setNotes).catch(() => {}), 60000);
+    return () => clearInterval(t);
+  }, []);
   useEffect(() => {
     const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  const count = data ? data.conns.length + data.mentees.length : 0;
+  const actionable = data ? data.conns.length + data.mentees.length : 0;
+  const count = actionable + (notes.unread || 0);
 
   const actConn = async (id, accept) => { await api.put(`/connections/${id}`, { accept }); load(); };
   const actMentee = async (id, status) => { await api.put(`/mentorships/${id}`, { status }); load(); };
 
+  const openBell = async () => {
+    const next = !open;
+    setOpen(next);
+    if (next) {
+      await load();
+      if (notes.unread > 0) {
+        await api.put("/notifications/read").catch(() => {});
+        setNotes((n) => ({ ...n, unread: 0 }));
+      }
+    }
+  };
+
   return (
     <div className="bell-wrap" ref={ref}>
-      <button className="bell" onClick={() => { setOpen(!open); if (!open) load(); }} aria-label="Notifications">
+      <button className="bell" onClick={openBell} aria-label={`Notifications${count ? ` (${count} new)` : ""}`}>
         <Icon name="bell" size={17} />
-        {count > 0 && <span className="bell-dot" />}
+        {count > 0 && <span className="bell-count">{count > 9 ? "9+" : count}</span>}
       </button>
       {open && (
         <div className="dropdown">
           <h5>Notifications</h5>
-          {data && count === 0 && <p className="dd-empty">You're all caught up.</p>}
+          {data && count === 0 && notes.items.length === 0 && <p className="dd-empty">You're all caught up.</p>}
           {data?.conns.map((c) => (
             <div key={c.connection_id} className="dd-row">
               <Avatar name={c.author_name} file={c.author_avatar} size={30} />
@@ -166,6 +189,18 @@ function Bell() {
               <div className="dd-txt"><b>{m.author_name}</b> requested mentorship{m.goal_note ? ` — "${m.goal_note}"` : ""}</div>
               <button className="btn-mini" onClick={() => actMentee(m.id, "active")}>Accept</button>
               <button className="btn-mini ghost" onClick={() => actMentee(m.id, "declined")}>Decline</button>
+            </div>
+          ))}
+          {/* Things that already happened — likes, comments, replies. Nothing to action,
+              but they used to vanish entirely because the bell only computed live state. */}
+          {notes.items.map((n) => (
+            <div key={n.id} className={`dd-row note ${n.read_at ? "" : "unread"}`}
+              onClick={() => { setOpen(false); if (n.link) nav(n.link); }}>
+              <Avatar name={n.actor_name || "The Quad"} file={n.actor_avatar} size={30} />
+              <div className="dd-txt">
+                {n.body}
+                <span className="note-time">{timeAgo(n.created_at)}</span>
+              </div>
             </div>
           ))}
           <button className="dd-foot" onClick={() => { setOpen(false); nav("/mentoring"); }}>Open mentoring →</button>

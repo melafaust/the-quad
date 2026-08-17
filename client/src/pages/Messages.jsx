@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { api, timeAgo } from "../api.js";
+import { report } from "./Home.jsx";
 import { useAuth } from "../App.jsx";
 import { Avatar, Badge, Spinner } from "../ui.jsx";
 
-const MESSAGE_MAX = 2000; // matches the server, which truncates at 2000
+const MESSAGE_MAX = 2000;   // matches the server, which truncates at 2000
+const RECALL_MINUTES = 15;  // matches the server's recall/edit window
 
 export default function Messages() {
   const { userId } = useParams();
@@ -36,6 +38,20 @@ export default function Messages() {
     const t = setInterval(() => { loadThread(); loadConvs(); }, 12000);
     return () => clearInterval(t);
   }, [userId]);
+
+  // Mirrors the server's window; the server is still the authority.
+  const canChange = (m) => (Date.now() - new Date(m.created_at).getTime()) / 60000 <= RECALL_MINUTES;
+  const editMsg = async (m) => {
+    const body = prompt("Edit your message", m.body);
+    if (body === null || !body.trim()) return;
+    try { await api.put(`/messages/item/${m.id}`, { body }); loadThread(); loadConvs(); }
+    catch (e) { alert(e.message); }
+  };
+  const recallMsg = async (m) => {
+    if (!confirm("Recall this message? It stays in the thread as \"Message removed\".")) return;
+    try { await api.put(`/messages/item/${m.id}`, { recall: true }); loadThread(); loadConvs(); }
+    catch (e) { alert(e.message); }
+  };
 
   const send = async (e) => {
     e.preventDefault();
@@ -100,9 +116,22 @@ export default function Messages() {
                 </div>
               )}
               {thread.thread.map((m) => (
-                <div key={m.id} className={`msg ${m.sender_id === me.id ? "mine" : "theirs"}`}>
-                  {m.body}
-                  <span className="t">{timeAgo(m.created_at)}</span>
+                <div key={m.id} className={`msg ${m.sender_id === me.id ? "mine" : "theirs"} ${m.recalled_at ? "recalled" : ""}`}>
+                  {m.recalled_at ? <i>Message removed</i> : m.body}
+                  <span className="t">
+                    {timeAgo(m.created_at)}
+                    {m.edited_at && !m.recalled_at && " · edited"}
+                    {/* Recall and edit are only offered inside the window the server enforces. */}
+                    {m.sender_id === me.id && !m.recalled_at && canChange(m) && (
+                      <>
+                        {" · "}<button className="msg-act" onClick={() => editMsg(m)}>Edit</button>
+                        {" · "}<button className="msg-act" onClick={() => recallMsg(m)}>Recall</button>
+                      </>
+                    )}
+                    {m.sender_id !== me.id && !m.recalled_at && (
+                      <>{" · "}<button className="msg-act" onClick={() => report("message", m.id)}>Report</button></>
+                    )}
+                  </span>
                 </div>
               ))}
               <div ref={bottomRef} />

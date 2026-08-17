@@ -12,6 +12,16 @@ function greeting() {
   return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
 }
 
+// Members can raise a report; nothing is hidden automatically, an admin reviews each one.
+export async function report(kind, id) {
+  const reason = prompt(`Why are you reporting this ${kind}? An admin will review it.`);
+  if (reason === null) return;
+  try {
+    await api.post("/reports", { target_type: kind, target_id: id, reason });
+    alert("Thanks — an admin will review this. Your name isn't shown to the person you reported.");
+  } catch (e) { alert(e.message); }
+}
+
 function Post({ p, me, onDelete }) {
   const [likes, setLikes] = useState(p.likes);
   const [liked, setLiked] = useState(!!p.liked_by_me);
@@ -54,6 +64,9 @@ function Post({ p, me, onDelete }) {
             {p.author_city ? ` · ${p.author_city}` : ""} · <span className="post-time">{timeAgo(p.created_at)}</span>
           </div>
         </div>
+        {p.author_id !== me.id && (
+          <button className="post-del" title="Report this post" onClick={() => report("post", p.id)}>!</button>
+        )}
         {(p.author_id === me.id || me.role === "admin") && (
           <button className="post-del" title="Delete post" onClick={() => onDelete(p.id)}><Icon name="x" size={13} /></button>
         )}
@@ -73,6 +86,10 @@ function Post({ p, me, onDelete }) {
             <div key={c.id} className="comment">
               <Avatar name={c.author_name} file={c.author_avatar} size={28} />
               <div className="bubble"><b>{c.author_name}</b>{c.body}</div>
+              {c.author_id !== me.id && (
+                <button className="report-btn" title="Report this comment"
+                  onClick={() => report("comment", c.id)}>!</button>
+              )}
             </div>
           ))}
           <form className="comment-box" onSubmit={sendComment}>

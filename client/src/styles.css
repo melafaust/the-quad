@@ -478,3 +478,26 @@ table.adm .mono { font-family: Consolas, monospace; font-size: 12px; color: var(
 .conv-new { padding: 10px; border-bottom: 1px solid var(--line); }
 .conv-new select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; outline: none; }
 .hint-inline { display: block; margin-top: 4px; font-size: 11px; color: var(--slate); line-height: 1.4; }
+
+/* notifications */
+.bell-count { position: absolute; top: 0; right: 0; min-width: 15px; height: 15px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
+  background: var(--crimson); color: #FFF; font-size: 9.5px; font-weight: 700;
+  box-shadow: 0 0 0 2px var(--navy); }
+.dd-row.note { cursor: pointer; align-items: flex-start; }
+.dd-row.note:hover { background: var(--wash); }
+.dd-row.note.unread { background: #F0F9FF; }
+.note-time { display: block; font-size: 10.5px; color: var(--slate-lt); margin-top: 2px; }
+
+/* report affordance */
+.report-btn { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line);
+  background: #FFF; color: var(--slate-lt); font-weight: 800; font-size: 11px; line-height: 1;
+  align-self: center; }
+.report-btn:hover { color: var(--crimson); border-color: #FECACA; }
+.comment { align-items: flex-start; }
+
+/* message recall / edit */
+.msg-act { background: none; border: 0; padding: 0; font-size: inherit; color: inherit;
+  text-decoration: underline; opacity: .75; }
+.msg-act:hover { opacity: 1; }
+.msg.recalled { opacity: .6; }

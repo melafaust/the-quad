@@ -60,6 +60,26 @@ const BAD_URL = "Links must start with http:// or https://";
 // runaway number, not a product rule — each mentor sets their own number under it.
 const MENTEE_CAP = 20;
 
+// How long after sending a message you can still recall or edit it.
+const RECALL_MINUTES = 15;
+
+// Record something that happened to `userId`. Never notifies you about your own action,
+// and never blocks the request it hangs off — a failed notification must not fail a like.
+async function notify(userId, actorId, kind, body, link = "") {
+  if (!userId || userId === actorId) return;
+  try {
+    await db.run("INSERT INTO notifications (user_id,actor_id,kind,body,link) VALUES (?,?,?,?,?)",
+      userId, actorId, kind, String(body).slice(0, 300), String(link).slice(0, 200));
+  } catch (e) { console.error("notify failed:", e.message); }
+}
+
+async function audit(actorId, action, targetType, targetId, detail = "") {
+  try {
+    await db.run("INSERT INTO audit_log (actor_id,action,target_type,target_id,detail) VALUES (?,?,?,?,?)",
+      actorId, action, targetType, targetId, String(detail).slice(0, 500));
+  } catch (e) { console.error("audit failed:", e.message); }
+}
+
 // A LinkedIn link is only useful if it points at an actual profile. Members were pasting
 // bare handles, company pages and half-remembered URLs, which showed a working "in" icon
 // that led to a 404. Accept the common shapes, normalise them, reject the rest.
@@ -157,6 +177,39 @@ router.get("/users/:id/cv", async (req, res) => {
   res.redirect(data.signedUrl);
 });
 
+/* ---------------- reports ---------------- */
+
+// Any member can raise a report. Content is not auto-hidden — an admin reviews every one,
+// and the reporter's name is visible to admins only, never to the person reported.
+const REPORTABLE = ["post", "comment", "message", "listing", "job"];
+router.post("/reports", async (req, res) => {
+  const { target_type, target_id, reason } = req.body || {};
+  if (!REPORTABLE.includes(target_type)) return res.status(400).json({ error: "Can't report that" });
+  if (!Number(target_id)) return res.status(400).json({ error: "Nothing to report" });
+  const dupe = await db.get(`SELECT 1 FROM reports WHERE reporter_id=? AND target_type=? AND target_id=? AND status='open'`,
+    req.user.id, target_type, Number(target_id));
+  if (dupe) return res.json({ ok: true, already: true });
+  await db.run("INSERT INTO reports (reporter_id,target_type,target_id,reason) VALUES (?,?,?,?)",
+    req.user.id, target_type, Number(target_id), String(reason || "").slice(0, 500));
+  res.json({ ok: true });
+});
+
+/* ---------------- notifications ---------------- */
+
+router.get("/notifications", async (req, res) => {
+  const rows = await db.all(`SELECT n.id, n.kind, n.body, n.link, n.read_at, n.created_at,
+      u.id AS actor_id, u.name AS actor_name, u.avatar_file AS actor_avatar
+    FROM notifications n LEFT JOIN users u ON u.id=n.actor_id
+    WHERE n.user_id=? ORDER BY n.created_at DESC LIMIT 50`, req.user.id);
+  const unread = (await db.get("SELECT COUNT(*) n FROM notifications WHERE user_id=? AND read_at IS NULL", req.user.id)).n;
+  res.json({ items: rows, unread: Number(unread) });
+});
+
+router.put("/notifications/read", async (req, res) => {
+  await db.run("UPDATE notifications SET read_at=NOW() WHERE user_id=? AND read_at IS NULL", req.user.id);
+  res.json({ ok: true });
+});
+
 /* ---------------- directory + connections ---------------- */
 
 router.get("/members", async (req, res) => {
@@ -200,6 +253,7 @@ router.post("/connections/:userId", async (req, res) => {
   if (!(await db.get("SELECT id FROM users WHERE id=? AND active=TRUE", other))) return res.status(404).json({ error: "Member not found" });
   if (await connectionBetween(req.user.id, other)) return res.status(409).json({ error: "Connection already exists" });
   await db.run("INSERT INTO connections (requester_id,recipient_id) VALUES (?,?)", req.user.id, other);
+  await notify(other, req.user.id, "connection", `${req.user.name} wants to connect with you.`, "/directory");
   res.json({ ok: true });
 });
 
@@ -208,6 +262,8 @@ router.put("/connections/:id", async (req, res) => {
   if (!c || c.recipient_id !== req.user.id) return res.status(404).json({ error: "Request not found" });
   const status = req.body.accept ? "accepted" : "declined";
   await db.run("UPDATE connections SET status=? WHERE id=?", status, c.id);
+  if (req.body.accept) await notify(c.requester_id, req.user.id, "connection",
+    `${req.user.name} accepted your connection request.`, "/directory");
   res.json({ ok: true, status });
 });
 
@@ -241,9 +297,10 @@ router.get("/connections", async (req, res) => {
 const POST_SELECT = `
   SELECT p.id, p.body, p.link_url, p.created_at, ${author("u")},
     (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) AS likes,
-    (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id=p.id) AS comments,
+    (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id=p.id AND pc.removed_at IS NULL) AS comments,
     EXISTS(SELECT 1 FROM post_likes pl WHERE pl.post_id=p.id AND pl.user_id=@me) AS liked_by_me
-  FROM posts p JOIN users u ON u.id=p.author_id AND u.active=TRUE`;
+  FROM posts p JOIN users u ON u.id=p.author_id AND u.active=TRUE
+  WHERE p.removed_at IS NULL`;
 
 router.get("/feed", async (req, res) => {
   const posts = await db.all(`${POST_SELECT} ORDER BY p.created_at DESC LIMIT 50`, { me: req.user.id });
@@ -257,34 +314,51 @@ router.post("/posts", async (req, res) => {
   if (link === null) return res.status(400).json({ error: BAD_URL });
   const info = await db.run("INSERT INTO posts (author_id,body,link_url) VALUES (?,?,?) RETURNING id",
     req.user.id, body.slice(0, 3000), link);
-  res.json(await db.get(`${POST_SELECT} WHERE p.id=@id`, { me: req.user.id, id: info.rows[0].id }));
+  res.json(await db.get(`${POST_SELECT} AND p.id=@id`, { me: req.user.id, id: info.rows[0].id }));
 });
 
 router.delete("/posts/:id", async (req, res) => {
-  const p = await db.get("SELECT author_id FROM posts WHERE id=?", req.params.id);
+  const p = await db.get("SELECT author_id, body FROM posts WHERE id=?", req.params.id);
   if (!p) return res.status(404).json({ error: "Post not found" });
   if (p.author_id !== req.user.id && req.user.role !== "admin") return res.status(403).json({ error: "Not your post" });
-  await db.run("DELETE FROM posts WHERE id=?", req.params.id);
+  if (p.author_id === req.user.id) {
+    await db.run("DELETE FROM posts WHERE id=?", req.params.id);
+  } else {
+    // An admin removing someone else's post marks it removed rather than deleting it, so
+    // it can be restored and the member can be told why.
+    await db.run("UPDATE posts SET removed_at=NOW(), removed_by=? WHERE id=?", req.user.id, req.params.id);
+    await audit(req.user.id, "remove", "post", Number(req.params.id), String(p.body || "").slice(0, 200));
+    await notify(p.author_id, req.user.id, "moderation", "An admin removed one of your posts.", "/");
+  }
   res.json({ ok: true });
 });
 
 router.post("/posts/:id/like", async (req, res) => {
   const liked = await db.get("SELECT 1 FROM post_likes WHERE post_id=? AND user_id=?", req.params.id, req.user.id);
   if (liked) await db.run("DELETE FROM post_likes WHERE post_id=? AND user_id=?", req.params.id, req.user.id);
-  else await db.run("INSERT INTO post_likes VALUES (?,?)", req.params.id, req.user.id);
+  else {
+    await db.run("INSERT INTO post_likes VALUES (?,?)", req.params.id, req.user.id);
+    const post = await db.get("SELECT author_id, body FROM posts WHERE id=?", req.params.id);
+    if (post) await notify(post.author_id, req.user.id, "like",
+      `${req.user.name} liked your post: "${post.body.slice(0, 60)}"`, "/");
+  }
   const likes = (await db.get("SELECT COUNT(*) n FROM post_likes WHERE post_id=?", req.params.id)).n;
   res.json({ likes, liked_by_me: !liked });
 });
 
 router.get("/posts/:id/comments", async (req, res) => {
   res.json(await db.all(`SELECT pc.id, pc.body, pc.created_at, ${author("u")}
-    FROM post_comments pc JOIN users u ON u.id=pc.author_id WHERE pc.post_id=? ORDER BY pc.created_at`, req.params.id));
+    FROM post_comments pc JOIN users u ON u.id=pc.author_id
+    WHERE pc.post_id=? AND pc.removed_at IS NULL ORDER BY pc.created_at`, req.params.id));
 });
 
 router.post("/posts/:id/comments", async (req, res) => {
   const body = (req.body.body || "").trim();
   if (!body) return res.status(400).json({ error: "Write something first" });
   await db.run("INSERT INTO post_comments (post_id,author_id,body) VALUES (?,?,?)", req.params.id, req.user.id, body.slice(0, 1000));
+  const post = await db.get("SELECT author_id FROM posts WHERE id=?", req.params.id);
+  if (post) await notify(post.author_id, req.user.id, "comment",
+    `${req.user.name} commented on your post: "${body.slice(0, 60)}"`, "/");
   res.json({ ok: true });
 });
 
@@ -292,8 +366,8 @@ router.post("/posts/:id/comments", async (req, res) => {
 
 router.get("/jobs", async (req, res) => {
   const { country, fn, q } = req.query;
-  const where = ["1=1"], vals = [];
-  if (country) { where.push("j.country=?"); vals.push(country); }
+  const where = ["j.removed_at IS NULL"], vals = [];
+  if (country) { where.push("LOWER(TRIM(j.country))=LOWER(TRIM(?))"); vals.push(country); }
   if (fn) { where.push("j.job_function=?"); vals.push(fn); }
   if (q) { where.push("(j.title ILIKE ? OR j.company ILIKE ?)"); vals.push(`%${q}%`, `%${q}%`); }
   res.json(await db.all(`SELECT j.*, ${author("u")} FROM jobs j JOIN users u ON u.id=j.poster_id
@@ -311,11 +385,34 @@ router.post("/jobs", async (req, res) => {
   res.json({ id: info.rows[0].id });
 });
 
-router.delete("/jobs/:id", async (req, res) => {
+// A job could be created and removed but never corrected, so fixing a typo meant deleting
+// and re-posting, which lost the original posting date.
+router.put("/jobs/:id", async (req, res) => {
   const j = await db.get("SELECT poster_id FROM jobs WHERE id=?", req.params.id);
   if (!j) return res.status(404).json({ error: "Job not found" });
   if (j.poster_id !== req.user.id && req.user.role !== "admin") return res.status(403).json({ error: "Not your job post" });
-  await db.run("DELETE FROM jobs WHERE id=?", req.params.id);
+  const b = req.body;
+  if (!b.title || !b.company) return res.status(400).json({ error: "Title and company are required" });
+  b.apply_url = safeUrl(b.apply_url);
+  if (b.apply_url === null) return res.status(400).json({ error: BAD_URL });
+  const cols = ["title","company","location","country","job_type","salary_range","job_function","description","apply_url","apply_email"];
+  const vals = cols.map((k) => String(b[k] || "").slice(0, 1000));
+  await db.run(`UPDATE jobs SET ${cols.map((c) => c + "=?").join(",")} WHERE id=?`, vals, req.params.id);
+  if (j.poster_id !== req.user.id) await audit(req.user.id, "edit", "job", Number(req.params.id), b.title);
+  res.json({ ok: true });
+});
+
+router.delete("/jobs/:id", async (req, res) => {
+  const j = await db.get("SELECT poster_id, title FROM jobs WHERE id=?", req.params.id);
+  if (!j) return res.status(404).json({ error: "Job not found" });
+  if (j.poster_id !== req.user.id && req.user.role !== "admin") return res.status(403).json({ error: "Not your job post" });
+  if (j.poster_id === req.user.id) {
+    await db.run("DELETE FROM jobs WHERE id=?", req.params.id);
+  } else {
+    await db.run("UPDATE jobs SET removed_at=NOW(), removed_by=? WHERE id=?", req.user.id, req.params.id);
+    await audit(req.user.id, "remove", "job", Number(req.params.id), j.title || "");
+    await notify(j.poster_id, req.user.id, "moderation", "An admin removed one of your job posts.", "/jobs");
+  }
   res.json({ ok: true });
 });
 
@@ -419,6 +516,7 @@ router.post("/mentorships", async (req, res) => {
   if (active >= mp.capacity) return res.status(409).json({ error: "This mentor is at capacity right now" });
   await db.run("INSERT INTO mentorships (mentor_id,mentee_id,goal_note) VALUES (?,?,?)",
     mentorId, req.user.id, String(req.body.goal_note || "").slice(0, 500));
+  await notify(mentorId, req.user.id, "mentorship", `${req.user.name} asked you to be their mentor.`, "/mentoring");
   res.json({ ok: true });
 });
 
@@ -430,6 +528,8 @@ router.put("/mentorships/:id", async (req, res) => {
   const allowed = (asMentor && ["active", "declined", "ended"].includes(status)) || (asMentee && status === "ended");
   if (!allowed) return res.status(403).json({ error: "You can't make that change" });
   await db.run("UPDATE mentorships SET status=? WHERE id=?", status, m.id);
+  if (asMentor && status === "active")
+    await notify(m.mentee_id, req.user.id, "mentorship", `${req.user.name} accepted your mentorship request.`, "/mentoring");
   res.json({ ok: true });
 });
 
@@ -514,12 +614,33 @@ router.get("/messages/:userId", async (req, res) => {
   res.json({ partner, thread });
 });
 
+// Recall leaves a "message removed" placeholder rather than erasing the exchange, and an
+// edit is marked as edited, so neither can be used to rewrite what was said.
+router.put("/messages/item/:id", async (req, res) => {
+  const m = await db.get("SELECT * FROM messages WHERE id=?", req.params.id);
+  if (!m) return res.status(404).json({ error: "Message not found" });
+  if (m.sender_id !== req.user.id) return res.status(403).json({ error: "That isn't your message" });
+  if (m.recalled_at) return res.status(400).json({ error: "That message was already recalled" });
+  const ageMin = (Date.now() - new Date(m.created_at).getTime()) / 60000;
+  if (ageMin > RECALL_MINUTES)
+    return res.status(400).json({ error: `Messages can only be changed within ${RECALL_MINUTES} minutes of sending` });
+  if (req.body.recall) {
+    await db.run("UPDATE messages SET recalled_at=NOW(), body='' WHERE id=?", m.id);
+    return res.json({ ok: true, recalled: true });
+  }
+  const body = String(req.body.body || "").trim();
+  if (!body) return res.status(400).json({ error: "Write something first" });
+  await db.run("UPDATE messages SET body=?, edited_at=NOW() WHERE id=?", body.slice(0, 2000), m.id);
+  res.json({ ok: true });
+});
+
 router.post("/messages/:userId", async (req, res) => {
   const other = Number(req.params.userId);
   const body = (req.body.body || "").trim();
   if (!body) return res.status(400).json({ error: "Write something first" });
   if (!(await db.get("SELECT id FROM users WHERE id=? AND active=TRUE", other))) return res.status(404).json({ error: "Member not found" });
   await db.run("INSERT INTO messages (sender_id,recipient_id,body) VALUES (?,?,?)", req.user.id, other, body.slice(0, 2000));
+  await notify(other, req.user.id, "message", `${req.user.name} sent you a message.`, `/messages/${req.user.id}`);
   res.json({ ok: true });
 });
 
@@ -537,7 +658,7 @@ router.get("/home", async (req, res) => {
   const latestRequest = await db.get(`SELECT l.*, ${author("u")} FROM listings l JOIN users u ON u.id=l.owner_id
     WHERE l.status='live' AND l.kind='request' ORDER BY l.created_at DESC LIMIT 1`);
   const matchedJob = await db.get(`SELECT j.*, ${author("u")} FROM jobs j JOIN users u ON u.id=j.poster_id
-    WHERE (j.job_function=? OR ?='') ORDER BY j.created_at DESC LIMIT 1`, me.industry || "", me.industry || "");
+    WHERE j.removed_at IS NULL AND (j.job_function=? OR ?='') ORDER BY j.created_at DESC LIMIT 1`, me.industry || "", me.industry || "");
   const deal = await db.get(`SELECT l.*, ${author("u")} FROM listings l JOIN users u ON u.id=l.owner_id
     WHERE l.status='live' AND l.kind='offer' ORDER BY l.created_at DESC LIMIT 1`);
   const stats = {
@@ -672,6 +793,66 @@ router.get("/admin/password-resets", async (req, res) => {
     FROM password_resets pr JOIN users u ON u.id=pr.user_id
     WHERE pr.used_at IS NULL AND pr.expires_at > NOW()
     ORDER BY pr.created_at DESC`));
+});
+
+// Comments never appeared in the Content tab, so an admin could not see or remove one.
+router.get("/admin/comments", async (req, res) => {
+  res.json(await db.all(`SELECT pc.id, pc.body, pc.created_at, pc.removed_at,
+      p.id AS post_id, LEFT(p.body, 90) AS post_body, ${author("u")}
+    FROM post_comments pc JOIN users u ON u.id=pc.author_id JOIN posts p ON p.id=pc.post_id
+    ORDER BY pc.created_at DESC LIMIT 200`));
+});
+
+router.delete("/admin/comments/:id", async (req, res) => {
+  const c = await db.get("SELECT author_id, body FROM post_comments WHERE id=?", req.params.id);
+  if (!c) return res.status(404).json({ error: "Comment not found" });
+  await db.run("UPDATE post_comments SET removed_at=NOW(), removed_by=? WHERE id=?", req.user.id, req.params.id);
+  await audit(req.user.id, "remove", "comment", Number(req.params.id), String(c.body || "").slice(0, 200));
+  await notify(c.author_id, req.user.id, "moderation", "An admin removed one of your comments.", "/");
+  res.json({ ok: true });
+});
+
+// Everything an admin has removed, and the way back.
+router.get("/admin/removed", async (req, res) => {
+  const posts = await db.all(`SELECT p.id, 'post' AS kind, LEFT(p.body,140) AS summary, p.removed_at,
+      u.name AS author_name, a.name AS removed_by_name
+    FROM posts p JOIN users u ON u.id=p.author_id LEFT JOIN users a ON a.id=p.removed_by
+    WHERE p.removed_at IS NOT NULL`);
+  const jobs = await db.all(`SELECT j.id, 'job' AS kind, j.title AS summary, j.removed_at,
+      u.name AS author_name, a.name AS removed_by_name
+    FROM jobs j JOIN users u ON u.id=j.poster_id LEFT JOIN users a ON a.id=j.removed_by
+    WHERE j.removed_at IS NOT NULL`);
+  const comments = await db.all(`SELECT pc.id, 'comment' AS kind, LEFT(pc.body,140) AS summary, pc.removed_at,
+      u.name AS author_name, a.name AS removed_by_name
+    FROM post_comments pc JOIN users u ON u.id=pc.author_id LEFT JOIN users a ON a.id=pc.removed_by
+    WHERE pc.removed_at IS NOT NULL`);
+  res.json([...posts, ...jobs, ...comments].sort((a, b) => new Date(b.removed_at) - new Date(a.removed_at)));
+});
+
+const RESTORE_TABLE = { post: "posts", job: "jobs", comment: "post_comments" };
+router.put("/admin/removed/:kind/:id/restore", async (req, res) => {
+  const table = RESTORE_TABLE[req.params.kind];
+  if (!table) return res.status(400).json({ error: "Unknown content type" });
+  await db.run(`UPDATE ${table} SET removed_at=NULL, removed_by=NULL WHERE id=?`, req.params.id);
+  await audit(req.user.id, "restore", req.params.kind, Number(req.params.id));
+  res.json({ ok: true });
+});
+
+router.get("/admin/audit", async (req, res) => {
+  res.json(await db.all(`SELECT al.*, u.name AS actor_name FROM audit_log al
+    LEFT JOIN users u ON u.id=al.actor_id ORDER BY al.created_at DESC LIMIT 300`));
+});
+
+router.get("/admin/reports", async (req, res) => {
+  res.json(await db.all(`SELECT r.*, u.name AS reporter_name FROM reports r
+    JOIN users u ON u.id=r.reporter_id WHERE r.status='open' ORDER BY r.created_at DESC LIMIT 200`));
+});
+
+router.put("/admin/reports/:id", async (req, res) => {
+  await db.run("UPDATE reports SET status='closed', resolved_by=?, resolved_at=NOW() WHERE id=?",
+    req.user.id, req.params.id);
+  await audit(req.user.id, "resolve", "report", Number(req.params.id), String(req.body.note || ""));
+  res.json({ ok: true });
 });
 
 // ── Test Dashboard ────────────────────────────────────────────────────────────

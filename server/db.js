@@ -122,6 +122,45 @@ CREATE TABLE IF NOT EXISTS invites (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- One row per thing that happened to you. The bell used to compute pending requests live,
+-- so nothing that had already been dealt with (a like, a comment) was ever recorded.
+CREATE TABLE IF NOT EXISTS notifications (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  actor_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  link TEXT DEFAULT '',
+  body TEXT DEFAULT '',
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, read_at, created_at DESC);
+
+-- Every removal, deactivation and role change, so the alumni office can answer
+-- "why was my post taken down?" without guesswork.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id SERIAL PRIMARY KEY,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id INTEGER,
+  detail TEXT DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Member-raised reports on posts, comments and messages.
+CREATE TABLE IF NOT EXISTS reports (
+  id SERIAL PRIMARY KEY,
+  reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  target_type TEXT NOT NULL,
+  target_id INTEGER NOT NULL,
+  reason TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  resolved_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS password_resets (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -240,6 +279,18 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, recipient_id);
 CREATE INDEX IF NOT EXISTS idx_conn_recipient ON connections(recipient_id, status);
+
+-- These tables already exist in production, so new columns have to be added rather than
+-- declared above. Removal is now a flag instead of a DELETE, which is what makes a
+-- restore possible at all.
+ALTER TABLE posts          ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ;
+ALTER TABLE posts          ADD COLUMN IF NOT EXISTS removed_by INTEGER;
+ALTER TABLE jobs           ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ;
+ALTER TABLE jobs           ADD COLUMN IF NOT EXISTS removed_by INTEGER;
+ALTER TABLE post_comments  ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ;
+ALTER TABLE post_comments  ADD COLUMN IF NOT EXISTS removed_by INTEGER;
+ALTER TABLE messages       ADD COLUMN IF NOT EXISTS recalled_at TIMESTAMPTZ;
+ALTER TABLE messages       ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 `;
 
 const daysAgo = (n) => new Date(Date.now() - n * 86400000);
