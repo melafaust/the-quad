@@ -114,6 +114,12 @@ router.put("/me", async (req, res) => {
   res.json(await db.get(`SELECT ${PUBLIC_USER} FROM users WHERE id=?`, req.user.id));
 });
 
+// Marks the welcome tour as seen, so it doesn't greet a returning member on every visit.
+router.put("/me/tour", async (req, res) => {
+  await db.run("UPDATE users SET tour_done_at=? WHERE id=?", req.body.reset ? null : new Date(), req.user.id);
+  res.json({ ok: true });
+});
+
 router.post("/me/avatar", upload.single("avatar"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file received" });
   const ext = SAFE_EXT[req.file.mimetype] || ".bin";

@@ -22,6 +22,56 @@ export async function report(kind, id) {
   } catch (e) { alert(e.message); }
 }
 
+// Nothing oriented a first-time member: they landed on an empty feed with nine pillars in
+// the rail and no idea what any of them were for. Shown once, dismissible, and reopenable
+// from My profile. Deliberately a panel rather than a step-by-step overlay.
+const TOUR_STEPS = [
+  ["users", "Directory", "Every EDUK8U and ICQA graduate, filtered by programme, industry or country. Send a connect request to anyone.", "/directory"],
+  ["briefcase", "Jobs", "Roles posted by members, for members. Filter by country and function, and post your own openings.", "/jobs"],
+  ["store", "Alumni Marketplace", "Offer a service or product, or ask the community for what you need. Deals happen member to member.", "/marketplace"],
+  ["mentor", "Mentoring", "Opt in as a mentor, a mentee, or both. Matching is by industry, so fill in your industries and expertise.", "/mentoring"],
+  ["calendar", "Events", "Meetups and webinars from the alumni office. RSVP so they know to expect you.", "/events"],
+  ["chat", "Messages", "Message any member directly. You don't need to be connected first.", "/messages"],
+];
+
+function WelcomeTour({ me, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const dismiss = async () => {
+    setBusy(true);
+    try { await api.put("/me/tour", {}); } catch { /* dismiss locally regardless */ }
+    onDone();
+  };
+  return (
+    <section className="card tour">
+      <div className="tour-head">
+        <div>
+          <h2>Welcome to The Quad, {me.name.split(" ")[0]}.</h2>
+          <p>A private network for EDUK8U and ICQA alumni. Here's what's behind each section.</p>
+        </div>
+        <button className="tour-x" onClick={dismiss} aria-label="Dismiss">
+          <Icon name="x" size={14} stroke={2.4} />
+        </button>
+      </div>
+      <div className="tour-grid">
+        {TOUR_STEPS.map(([icon, title, blurb, to]) => (
+          <Link key={to} to={to} className="tour-step">
+            <span className="tour-ico"><Icon name={icon} size={16} /></span>
+            <b>{title}</b>
+            <span className="tour-blurb">{blurb}</span>
+          </Link>
+        ))}
+      </div>
+      <div className="tour-foot">
+        <Link className="btn sm" to="/profile">Complete my profile first</Link>
+        <button className="btn ghost sm" onClick={dismiss} disabled={busy}>
+          {busy ? "One moment…" : "Got it, hide this"}
+        </button>
+        <span className="tour-note">You can bring this back from My profile.</span>
+      </div>
+    </section>
+  );
+}
+
 function Post({ p, me, onDelete }) {
   const [likes, setLikes] = useState(p.likes);
   const [liked, setLiked] = useState(!!p.liked_by_me);
@@ -113,6 +163,7 @@ export default function Home() {
   const [linkUrl, setLinkUrl] = useState("");
   const [showLink, setShowLink] = useState(false);
   const [posting, setPosting] = useState(false);
+  const [showTour, setShowTour] = useState(!me.tour_done_at);
 
   const load = () => {
     api.get("/feed").then(setPosts);
@@ -147,6 +198,8 @@ export default function Home() {
   return (
     <div className="home-grid">
       <div className="feed">
+        {showTour && <WelcomeTour me={me} onDone={() => setShowTour(false)} />}
+
         <section className="card greeting">
           <h1>{greeting()}, {firstName} 👋</h1>
           <p>Here's what's moved in your network.</p>

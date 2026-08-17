@@ -11,7 +11,7 @@ const SECRET = process.env.JWT_SECRET;
 // always read "No CV uploaded yet" even though the upload had saved fine. Routes that serve
 // someone else's profile still gate the value behind cv_visibility before returning it.
 const PUBLIC_USER = `id,name,email,role,brand,programme,grad_year,job_title,company,industry,
-  country,city,linkedin_url,bio,avatar_file,cv_file,cv_visibility,created_at`;
+  country,city,linkedin_url,bio,avatar_file,cv_file,cv_visibility,tour_done_at,created_at`;
 
 function sign(user) {
   return jwt.sign({ id: user.id, role: user.role }, SECRET, { expiresIn: "30d" });

@@ -60,6 +60,11 @@ export default function ProfileEdit() {
 
   const signOut = () => { setToken(null); window.location.href = "/login"; };
   const [confirmOut, setConfirmOut] = useState(false);
+  const showTourAgain = async () => {
+    await api.put("/me/tour", { reset: true });
+    await refreshMe();
+    nav("/");
+  };
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const setM = (k) => (e) => setMentor({ ...mentor, [k]: e.target.value });
 
@@ -68,6 +73,7 @@ export default function ProfileEdit() {
       <div className="page-head">
         <h1>My profile</h1>
         <span className="spacer" />
+        <button className="btn ghost sm" onClick={showTourAgain}>Show the welcome tour</button>
         <button className="btn danger sm" onClick={() => setConfirmOut(true)}>Sign out</button>
       </div>
 
