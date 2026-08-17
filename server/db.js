@@ -23,7 +23,10 @@ function build(sql, args) {
   let positional = [];
   let named = {};
   for (const a of args) {
+    // A Date is an object but is a value, not a bag of named params — without this it
+    // would be spread into `named` and silently dropped from the query.
     if (Array.isArray(a)) positional = positional.concat(a);
+    else if (a instanceof Date || Buffer.isBuffer(a)) positional.push(a);
     else if (a && typeof a === "object") named = { ...named, ...a };
     else positional.push(a);
   }

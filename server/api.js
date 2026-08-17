@@ -116,7 +116,10 @@ router.put("/me", async (req, res) => {
 
 // Marks the welcome tour as seen, so it doesn't greet a returning member on every visit.
 router.put("/me/tour", async (req, res) => {
-  await db.run("UPDATE users SET tour_done_at=? WHERE id=?", req.body.reset ? null : new Date(), req.user.id);
+  // NOW() rather than a JS Date: the query builder treats any object argument as a bag of
+  // named parameters, and a Date is an object, so it would be swallowed instead of bound.
+  const reset = !!(req.body || {}).reset;
+  await db.run(`UPDATE users SET tour_done_at=${reset ? "NULL" : "NOW()"} WHERE id=?`, req.user.id);
   res.json({ ok: true });
 });
 
