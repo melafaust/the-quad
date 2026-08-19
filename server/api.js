@@ -379,8 +379,11 @@ router.get("/jobs", async (req, res) => {
   if (country) { where.push("LOWER(TRIM(j.country))=LOWER(TRIM(?))"); vals.push(country); }
   if (fn) { where.push("j.job_function=?"); vals.push(fn); }
   if (q) { where.push("(j.title ILIKE ? OR j.company ILIKE ?)"); vals.push(`%${q}%`, `%${q}%`); }
-  res.json(await db.all(`SELECT j.*, ${author("u")} FROM jobs j JOIN users u ON u.id=j.poster_id
-    WHERE ${where.join(" AND ")} ORDER BY j.created_at DESC LIMIT 100`, vals));
+  res.json(await db.all(`SELECT j.*, ${author("u")},
+      EXISTS(SELECT 1 FROM job_applications ja WHERE ja.job_id=j.id AND ja.applicant_id=@me) AS applied_by_me,
+      (SELECT COUNT(*) FROM job_applications ja WHERE ja.job_id=j.id) AS applicants
+    FROM jobs j JOIN users u ON u.id=j.poster_id
+    WHERE ${where.join(" AND ")} ORDER BY j.created_at DESC LIMIT 100`, vals, { me: req.user.id }));
 });
 
 router.post("/jobs", async (req, res) => {
@@ -423,6 +426,61 @@ router.delete("/jobs/:id", async (req, res) => {
     await notify(j.poster_id, req.user.id, "moderation", "An admin removed one of your job posts.", "/jobs");
   }
   res.json({ ok: true });
+});
+
+/* ---------------- job applications ---------------- */
+
+// Applying inside The Quad means the poster actually finds out. The old flow handed off to
+// a mail client or an external link, so nothing was ever recorded.
+router.post("/jobs/:id/apply", async (req, res) => {
+  const job = await db.get("SELECT id, poster_id, title, company, removed_at FROM jobs WHERE id=?", req.params.id);
+  if (!job || job.removed_at) return res.status(404).json({ error: "That job post is no longer available" });
+  if (job.poster_id === req.user.id) return res.status(400).json({ error: "That's your own job post" });
+  const dupe = await db.get("SELECT id FROM job_applications WHERE job_id=? AND applicant_id=?", job.id, req.user.id);
+  if (dupe) return res.status(409).json({ error: "You've already applied for this role" });
+  const shareCv = !!req.body.share_cv;
+  if (shareCv && !req.user.cv_file)
+    return res.status(400).json({ error: "Upload a CV on your profile first, or apply without one" });
+  await db.run("INSERT INTO job_applications (job_id,applicant_id,note,share_cv) VALUES (?,?,?,?)",
+    job.id, req.user.id, String(req.body.note || "").slice(0, 2000), shareCv);
+  await notify(job.poster_id, req.user.id, "application",
+    `${req.user.name} applied for ${job.title} at ${job.company}.`, "/jobs");
+  res.json({ ok: true });
+});
+
+// Attaching a CV to an application is explicit consent to share it with that poster, which
+// is separate from the member's general cv_visibility setting.
+router.get("/jobs/:jobId/applications/:appId/cv", async (req, res) => {
+  const row = await db.get(`SELECT ja.share_cv, u.cv_file, j.poster_id
+    FROM job_applications ja JOIN users u ON u.id=ja.applicant_id JOIN jobs j ON j.id=ja.job_id
+    WHERE ja.id=? AND ja.job_id=?`, req.params.appId, req.params.jobId);
+  if (!row) return res.status(404).json({ error: "Application not found" });
+  if (row.poster_id !== req.user.id && req.user.role !== "admin")
+    return res.status(403).json({ error: "Only the poster can see applicant CVs" });
+  if (!row.share_cv || !row.cv_file) return res.status(404).json({ error: "No CV attached to this application" });
+  const { data, error } = await supabase.storage.from(CV_BUCKET).createSignedUrl(row.cv_file, 60);
+  if (error) return res.status(500).json({ error: "Could not generate download link" });
+  res.redirect(data.signedUrl);
+});
+
+router.delete("/jobs/:id/apply", async (req, res) => {
+  await db.run("DELETE FROM job_applications WHERE job_id=? AND applicant_id=?", req.params.id, req.user.id);
+  res.json({ ok: true });
+});
+
+// Only the poster (or an admin) sees who applied.
+router.get("/jobs/:id/applications", async (req, res) => {
+  const job = await db.get("SELECT poster_id FROM jobs WHERE id=?", req.params.id);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+  if (job.poster_id !== req.user.id && req.user.role !== "admin")
+    return res.status(403).json({ error: "Only the poster can see applicants" });
+  const rows = await db.all(`SELECT ja.id, ja.note, ja.share_cv, ja.status, ja.created_at,
+      u.id AS applicant_id, u.name, u.email, u.job_title, u.company, u.programme, u.brand,
+      u.country, u.linkedin_url, u.avatar_file, u.cv_file
+    FROM job_applications ja JOIN users u ON u.id=ja.applicant_id
+    WHERE ja.job_id=? ORDER BY ja.created_at DESC`, req.params.id);
+  // The CV is only handed over if the applicant chose to attach it.
+  res.json(rows.map((r) => ({ ...r, cv_file: r.share_cv ? r.cv_file : "" })));
 });
 
 /* ---------------- marketplace ---------------- */

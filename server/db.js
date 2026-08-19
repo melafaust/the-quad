@@ -164,6 +164,20 @@ CREATE TABLE IF NOT EXISTS reports (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Applications live inside The Quad. Previously "Apply" handed off to an email client or an
+-- external link, so the app never learned an application had happened and the poster had
+-- nothing to be notified about.
+CREATE TABLE IF NOT EXISTS job_applications (
+  id SERIAL PRIMARY KEY,
+  job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  applicant_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  note TEXT DEFAULT '',
+  share_cv BOOLEAN NOT NULL DEFAULT FALSE,
+  status TEXT NOT NULL DEFAULT 'submitted',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (job_id, applicant_id)
+);
+
 CREATE TABLE IF NOT EXISTS password_resets (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
