@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import { api, setToken } from "../api.js";
 import { useAuth } from "../App.jsx";
 import { EMark, IMark, Badge, ErrorNote } from "../ui.jsx";
@@ -143,6 +144,10 @@ export default function Login() {
               {(tab === "forgot" || tab === "reset") && <button type="button" onClick={() => go("signin")}>Back to sign in</button>}
             </div>
           </div>
+          <p className="legal-links">
+            By creating an account you agree to our{" "}
+            <Link to="/terms">Terms of Use</Link> and <Link to="/privacy">Privacy Notice</Link>.
+          </p>
           <p className="demo-note">Demo data: sign in as nurul.rahman@demo.thequad / demo123 · admin: winnie.tam@eduk8u.com / ChangeMe123! · try invite code QUAD-DEMO-01</p>
         </div>
       </div>

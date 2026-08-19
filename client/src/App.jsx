@@ -15,6 +15,7 @@ import Messages from "./pages/Messages.jsx";
 import Admin from "./pages/Admin.jsx";
 import TestDashboard from "./pages/TestDashboard.jsx";
 import BetaTriage from "./pages/BetaTriage.jsx";
+import Legal from "./pages/Legal.jsx";
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
@@ -32,13 +33,16 @@ export default function App() {
 
   if (loading) return <div className="splash">The Quad</div>;
 
-  if (!me && location.pathname !== "/login")
+  const PUBLIC = ["/login", "/terms", "/privacy"];
+  if (!me && !PUBLIC.includes(location.pathname))
     return <Navigate to="/login" replace />;
 
   return (
     <AuthCtx.Provider value={{ me, setMe, refreshMe }}>
       <Routes>
         <Route path="/login" element={me ? <Navigate to="/" replace /> : <Login />} />
+        {!me && <Route path="/terms" element={<Legal />} />}
+        {!me && <Route path="/privacy" element={<Legal />} />}
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
           <Route path="/directory" element={<Directory />} />
@@ -53,6 +57,8 @@ export default function App() {
           <Route path="/admin" element={me?.role === "admin" ? <Admin /> : <Navigate to="/" replace />} />
           <Route path="/test-dashboard" element={me?.role === "admin" ? <TestDashboard /> : <Navigate to="/" replace />} />
           <Route path="/beta-triage" element={me?.role === "admin" ? <BetaTriage /> : <Navigate to="/" replace />} />
+          <Route path="/terms" element={<Legal />} />
+          <Route path="/privacy" element={<Legal />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

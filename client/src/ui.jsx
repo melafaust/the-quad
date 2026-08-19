@@ -294,6 +294,10 @@ export function Layout() {
             </nav>
           </div>
 
+          <div className="rail-legal">
+            <Link to="/terms">Terms</Link> · <Link to="/privacy">Privacy</Link>
+          </div>
+
           <div className="card mini-profile">
             <span className="av-wrap">
               <Avatar name={me.name} file={me.avatar_file} size={46} />
