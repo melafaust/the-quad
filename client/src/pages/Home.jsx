@@ -22,53 +22,105 @@ export async function report(kind, id) {
   } catch (e) { alert(e.message); }
 }
 
-// Nothing oriented a first-time member: they landed on an empty feed with nine pillars in
-// the rail and no idea what any of them were for. Shown once, dismissible, and reopenable
-// from My profile. Deliberately a panel rather than a step-by-step overlay.
-const TOUR_STEPS = [
-  ["users", "Directory", "Every EDUK8U and ICQA graduate, filtered by programme, industry or country. Send a connect request to anyone.", "/directory"],
-  ["briefcase", "Jobs", "Roles posted by members, for members. Filter by country and function, and post your own openings.", "/jobs"],
-  ["store", "Alumni Marketplace", "Offer a service or product, or ask the community for what you need. Deals happen member to member.", "/marketplace"],
-  ["mentor", "Mentoring", "Opt in as a mentor, a mentee, or both. Matching is by industry, so fill in your industries and expertise.", "/mentoring"],
-  ["calendar", "Events", "Meetups and webinars from the alumni office. RSVP so they know to expect you.", "/events"],
-  ["chat", "Messages", "Message any member directly. You don't need to be connected first.", "/messages"],
+// A step-by-step walkthrough for first-time members. Nothing oriented someone arriving for
+// the first time: they landed on an empty feed with nine pillars in the rail and no idea
+// what any of them were for. One idea per step, skippable at any point, and shown once.
+const TOUR = [
+  {
+    icon: "home", accent: "#0284C7", title: "Welcome to The Quad",
+    body: "A private network for EDUK8U and ICQA alumni across Malaysia, Sri Lanka, Fiji and Australia. Six sections, thirty seconds. You can skip this at any point.",
+  },
+  {
+    icon: "edit", accent: "#7C3AED", title: "Start with your profile", to: "/profile",
+    body: "Your job title, employer and industry are how other members find you, and how mentoring matches are made. A profile with an industry set gets found far more often than one without.",
+    cta: "Open my profile",
+  },
+  {
+    icon: "users", accent: "#0EA5E9", title: "Find people in the Directory", to: "/directory",
+    body: "Every graduate, filtered by programme, industry or country. Send a connect request to anyone. They'll see it in their notifications and you're connected once they accept.",
+    cta: "Browse the Directory",
+  },
+  {
+    icon: "briefcase", accent: "#0F766E", title: "Jobs are posted by members", to: "/jobs",
+    body: "Roles shared by alumni, for alumni. Apply inside The Quad and the person who posted it is notified straight away. You choose whether to attach your CV.",
+    cta: "See open roles",
+  },
+  {
+    icon: "store", accent: "#B45309", title: "Offer or find services", to: "/marketplace",
+    body: "The Alumni Marketplace is for member-run businesses and services. Offer something, or ask the community for what you need. Deals happen member to member and The Quad never handles money.",
+    cta: "Open the Marketplace",
+  },
+  {
+    icon: "mentor", accent: "#BE123C", title: "Mentoring runs on industries", to: "/mentoring",
+    body: "Opt in as a mentor, a mentee, or both. Matching is by industry, so add your industries and expertise or you won't appear in anyone's search. You set your own limit on mentees.",
+    cta: "Set up mentoring",
+  },
+  {
+    icon: "chat", accent: "#4338CA", title: "Events and messages", to: "/events",
+    body: "RSVP to meetups and webinars so the alumni office knows to expect you. You can message any member directly, and you don't need to be connected first.",
+    cta: "See what's coming up",
+  },
 ];
 
 function WelcomeTour({ me, onDone }) {
+  const [i, setI] = useState(0);
   const [busy, setBusy] = useState(false);
-  const dismiss = async () => {
+  const step = TOUR[i];
+  const last = i === TOUR.length - 1;
+
+  const finish = async () => {
     setBusy(true);
-    try { await api.put("/me/tour", {}); } catch { /* dismiss locally regardless */ }
+    try { await api.put("/me/tour", {}); } catch { /* close it either way */ }
     onDone();
   };
+  const next = () => (last ? finish() : setI(i + 1));
+  const back = () => setI(Math.max(0, i - 1));
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") finish();
+      if (e.key === "ArrowRight") next();
+      if (e.key === "ArrowLeft") back();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [i, busy]);
+
   return (
-    <section className="card tour">
-      <div className="tour-head">
-        <div>
-          <h2>Welcome to The Quad, {me.name.split(" ")[0]}.</h2>
-          <p>A private network for EDUK8U and ICQA alumni. Here's what's behind each section.</p>
-        </div>
-        <button className="tour-x" onClick={dismiss} aria-label="Dismiss">
+    <div className="tour-back" role="dialog" aria-modal="true" aria-label="Welcome walkthrough">
+      <div className="tour-card" key={i}>
+        <button className="tour-skip" onClick={finish} aria-label="Skip the walkthrough">
           <Icon name="x" size={14} stroke={2.4} />
         </button>
+
+        <span className="tour-badge" style={{ background: step.accent }}>
+          <Icon name={step.icon} size={22} stroke={2.1} />
+        </span>
+
+        <h2>{i === 0 ? `${step.title}, ${me.name.split(" ")[0]}.` : step.title}</h2>
+        <p>{step.body}</p>
+
+        {step.to && (
+          <Link className="tour-cta" to={step.to} onClick={finish}>{step.cta} →</Link>
+        )}
+
+        <div className="tour-dots" aria-hidden="true">
+          {TOUR.map((_, n) => (
+            <button key={n} className={`tour-dot ${n === i ? "on" : ""} ${n < i ? "done" : ""}`}
+              onClick={() => setI(n)} tabIndex={-1} />
+          ))}
+        </div>
+
+        <div className="tour-nav">
+          <button className="tour-text" onClick={finish} disabled={busy}>Skip</button>
+          <span className="tour-count">{i + 1} of {TOUR.length}</span>
+          {i > 0 && <button className="btn ghost sm" onClick={back}>Back</button>}
+          <button className="btn sm" onClick={next} disabled={busy}>
+            {busy ? "One moment…" : last ? "Start exploring" : "Next"}
+          </button>
+        </div>
       </div>
-      <div className="tour-grid">
-        {TOUR_STEPS.map(([icon, title, blurb, to]) => (
-          <Link key={to} to={to} className="tour-step">
-            <span className="tour-ico"><Icon name={icon} size={16} /></span>
-            <b>{title}</b>
-            <span className="tour-blurb">{blurb}</span>
-          </Link>
-        ))}
-      </div>
-      <div className="tour-foot">
-        <Link className="btn sm" to="/profile">Complete my profile first</Link>
-        <button className="btn ghost sm" onClick={dismiss} disabled={busy}>
-          {busy ? "One moment…" : "Got it, hide this"}
-        </button>
-        <span className="tour-note">You can bring this back from My profile.</span>
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -197,9 +249,9 @@ export default function Home() {
 
   return (
     <div className="home-grid">
-      <div className="feed">
-        {showTour && <WelcomeTour me={me} onDone={() => setShowTour(false)} />}
+      {showTour && <WelcomeTour me={me} onDone={() => setShowTour(false)} />}
 
+      <div className="feed">
         <section className="card greeting">
           <h1>{greeting()}, {firstName} 👋</h1>
           <p>Here's what's moved in your network.</p>
